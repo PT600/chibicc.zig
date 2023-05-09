@@ -1,7 +1,10 @@
 const std = @import("std");
 const writer = std.io.getStdOut().writer();
+const errwriter = std.io.getStdErr().writer();
 const utils = @import("./utils.zig");
 const Allocator = std.mem.Allocator;
+
+var current_input: [*:0]const u8 = undefined;
 
 fn print(comptime format: []const u8, args: anytype) void {
     writer.print(format, args) catch unreachable;
@@ -12,9 +15,19 @@ fn println(comptime format: []const u8, args: anytype) void {
     print("\n", .{});
 }
 
-fn error0(comptime format: []const u8, args: anytype) anyerror {
-    try std.io.getStdErr().writer().print(format, args);
+fn error_at(loc: [*]const u8, comptime format: []const u8, args: anytype) anyerror {
+    var pos = @ptrToInt(loc) - @ptrToInt(current_input);
+    try errwriter.print("{s}\n", .{current_input});
+    while (pos > 0) : (pos -= 1) {
+        try errwriter.print(" ", .{});
+    }
+    try errwriter.print("^ ", .{});
+    try errwriter.print(format, args);
     return error.ParseError;
+}
+
+fn error_tok(tok: *Token, comptime format: []const u8, args: anytype) anyerror {
+    return error_at(tok.loc.ptr, format, args);
 }
 
 const ParseError = error{ InvalidArgument, UnexpectedCharacter, ParseError };
@@ -37,14 +50,14 @@ const Token = struct {
 
     fn skip(self: *Token, s: []const u8) !?*Token {
         if (!self.eql(s)) {
-            return error0("expected '{s}'\n", .{s});
+            return error_tok(self, "expected '{s}'\n", .{s});
         }
         return self.next;
     }
 
     fn get_number(self: *Token) !i32 {
         if (self.kind != .Num) {
-            return error0("expected a number\n", .{});
+            return error_tok(self, "expected a number!\n", .{});
         }
         return self.val;
     }
@@ -64,8 +77,8 @@ fn isdigit(c: u8) bool {
     return c >= '0' and c <= '9';
 }
 
-fn tokenize(allocator: Allocator, source: [*]const u8) !*Token {
-    var p = source;
+fn tokenize(allocator: Allocator) !*Token {
+    var p = current_input;
     var head = Token{ .kind = .Eof, .loc = "" };
     var cur = &head;
     while (p[0] != 0) {
@@ -93,9 +106,9 @@ fn tokenize(allocator: Allocator, source: [*]const u8) !*Token {
             continue;
         }
 
-        return error0("invalid token", .{});
+        return error_at(p, "invalid token", .{});
     }
-    const token = Token.new(allocator, .{ .kind = .Eof, .loc = "" });
+    const token = Token.new(allocator, .{ .kind = .Eof, .loc = p[0..0] });
     cur.next = token;
     cur = token;
 
@@ -107,12 +120,12 @@ pub fn main() !void {
     if (argv.len != 2) {
         return error.InvalidArgument;
     }
-    var p = argv[1];
+    current_input = argv[1];
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var first_token = try tokenize(allocator, p);
+    var first_token = try tokenize(allocator);
 
     println("  .globl main", .{});
     println("main:", .{});
@@ -124,13 +137,13 @@ pub fn main() !void {
     while (next) |token| {
         if (token.kind == .Eof) break;
         if (token.eql("+")) {
-            const t = token.next orelse return error0("expected token", .{});
+            const t = token.next orelse return error_tok(token, "expected token after +", .{});
             num = try t.get_number();
             println("  add ${d}, %rax", .{num});
             next = t.next;
             continue;
         }
-        const t = try token.skip("-") orelse return error0("expected token", .{});
+        const t = try token.skip("-") orelse return error_tok(token, "expected token after -", .{});
         num = try t.get_number();
         println("  sub ${d}, %rax", .{num});
         next = t.next;

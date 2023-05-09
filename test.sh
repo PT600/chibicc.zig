@@ -3,7 +3,7 @@ assert() {
   expected="$1"
   input="$2"
 
-  ./zig-out/bin/chibicc.zig "$input" > ./zig-out/tmp.s || exit
+  ./zig-out/bin/chibicc "$input" > ./zig-out/tmp.s || exit
   gcc -static -o ./zig-out/tmp ./zig-out/tmp.s
   ./zig-out/tmp
   actual="$?"
