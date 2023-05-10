@@ -1,4 +1,23 @@
 const std = @import("std");
+pub const writer = std.io.getStdOut().writer();
+pub const errwriter = std.io.getStdErr().writer();
+
+pub fn print(comptime format: []const u8, args: anytype) void {
+    writer.print(format, args) catch unreachable;
+}
+
+pub fn println(comptime format: []const u8, args: anytype) void {
+    print(format, args);
+    print("\n", .{});
+}
+
+pub fn assert(v: bool) !void {
+    if (!v) {
+        return error.AssertError;
+    }
+}
+
+pub const Errors = error{ InvalidArgument, UnexpectedCharacter, ParseError, AssertError, TokenError };
 
 pub fn strtol(source: [*]const u8, new_p: *[*]const u8) !i32 {
     var p = source;
