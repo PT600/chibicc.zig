@@ -14,11 +14,14 @@ pub const NodeKind = enum {
     NotEqual,
     LessThan,
     LessEqual,
+    Stmt,
+    Eof,
     // Note: no > and >=
 };
 
 pub const Node = struct {
     kind: NodeKind,
+    next: *Node = undefined,
     lhs: ?*Node = null,
     rhs: ?*Node = null,
     val: i32 = 0,
@@ -29,19 +32,41 @@ const Self = @This();
 allocator: std.mem.Allocator,
 tokenizer: *Tokenizer,
 cur_token: *Token,
+eof_node: *Node,
 
 pub fn init(allocator: std.mem.Allocator, tokenizer: *Tokenizer, cur_token: *Token) Self {
-    return Self{
+    var self = Self{
         .allocator = allocator,
         .tokenizer = tokenizer,
         .cur_token = cur_token,
+        .eof_node = undefined,
     };
+    self.eof_node = self.new_node(.{ .kind = .Eof });
+    return self;
+}
+
+pub fn parse(self: *Self) anyerror!*Node {
+    var head = Node{ .kind = .Stmt };
+    var cur = &head;
+    while (self.cur_token.kind != .Eof) {
+        cur.next = try self.stmt();
+        cur = cur.next;
+    }
+    return head.next;
 }
 
 fn new_node(self: *Self, attr: Node) *Node {
     const node = self.allocator.create(Node) catch unreachable;
     node.* = attr;
+    node.next = self.eof_node;
     return node;
+}
+
+pub fn stmt(self: *Self) anyerror!*Node {
+    var node = try self.expr();
+    _ = try self.cur_token.skip(";");
+    self.advance();
+    return self.new_node(.{ .kind = .Stmt, .lhs = node });
 }
 
 pub fn expr(self: *Self) anyerror!*Node {

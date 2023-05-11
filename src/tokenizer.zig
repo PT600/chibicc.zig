@@ -50,7 +50,7 @@ fn isdigit(c: u8) bool {
 
 fn ispunct(c: u8) bool {
     return switch (c) {
-        '+', '-', '*', '/', '(', ')', '=', '<', '>', '!' => true,
+        '+', '-', '*', '/', '(', ')', '=', '<', '>', '!', ';' => true,
         else => false,
     };
 }
@@ -70,6 +70,15 @@ pub fn init(allocator: std.mem.Allocator, source: [*:0]const u8) Self {
         .source = source,
         .eof_token = token,
     };
+}
+
+pub fn debug_token(self: *Self, token: *Token) !void {
+    var cur = token;
+    while (cur != self.eof_token) {
+        try errwriter.print("{}: {s} | ", .{ cur.kind, cur.loc });
+        cur = cur.next;
+    }
+    try errwriter.print("\n", .{});
 }
 
 pub fn error_at(self: *Self, loc: [*]const u8, comptime format: []const u8, args: anytype) anyerror {
@@ -122,6 +131,6 @@ pub fn tokenize(self: *Self) anyerror!*Token {
 
         return self.error_at(p, "invalid token", .{});
     }
-
+    try self.debug_token(head.next);
     return head.next;
 }

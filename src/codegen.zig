@@ -4,7 +4,7 @@ const Node = Parser.Node;
 const utils = @import("utils.zig");
 const println = utils.println;
 
-const GenError = error{InvalidExpression};
+const GenError = error{ InvalidExpression, InvalidStmt };
 
 const Self = @This();
 
@@ -22,6 +22,26 @@ pub fn push(self: *Self) void {
 pub fn pop(self: *Self, arg: []const u8) void {
     println("  pop {s}", .{arg});
     self.depth -= 1;
+}
+
+pub fn gen(self: *Self, node: *Node) !void {
+    println("  .globl main", .{});
+    println("main:", .{});
+
+    var cur = node;
+    while (cur.kind != .Eof) : (cur = cur.next) {
+        try self.gen_stmt(cur);
+        try utils.assert(self.depth == 0);
+    }
+    println("  ret", .{});
+}
+
+pub fn gen_stmt(self: *Self, node: *Node) !void {
+    if (node.kind == .Stmt) {
+        const expr_node = node.lhs.?;
+        return self.gen_expr(expr_node);
+    }
+    return error.InvalidStmt;
 }
 
 // push right to the stack
