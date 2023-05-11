@@ -4,7 +4,7 @@ const utils = @import("./utils.zig");
 const println = utils.println;
 const Tokenizer = @import("./tokenizer.zig");
 const Parser = @import("./parser.zig");
-const Generator = @import("./generator.zig");
+const Codegen = @import("./codegen.zig");
 
 pub fn main() !void {
     const argv = std.os.argv;
@@ -19,13 +19,13 @@ pub fn main() !void {
     const token = try tokenizer.tokenize();
     var parser = Parser.init(allocator, &tokenizer, token);
     const node = try parser.expr();
-    var generator = Generator.init();
+    var codegen = Codegen.init();
 
     println("  .globl main", .{});
     println("main:", .{});
 
-    try generator.gen_expr(node);
+    try codegen.gen_expr(node);
     println("  ret", .{});
 
-    try utils.assert(generator.depth == 0);
+    try utils.assert(codegen.depth == 0);
 }
