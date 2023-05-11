@@ -24,10 +24,22 @@ pub fn pop(self: *Self, arg: []const u8) void {
     self.depth -= 1;
 }
 
+// push right to the stack
+// set left to the %rax
+// pop the right to the %rdi from stack
+// eval the expr to the %rax
 pub fn gen_expr(self: *Self, node: *Node) !void {
-    if (node.kind == .Num) {
-        println("  mov ${d}, %rax", .{node.val});
-        return;
+    switch (node.kind) {
+        .Num => {
+            println("  mov ${d}, %rax", .{node.val});
+            return;
+        },
+        .Neg => {
+            try self.gen_expr(node.lhs.?);
+            println(" neg %rax", .{});
+            return;
+        },
+        else => {},
     }
     const right = node.rhs orelse return error.TokenError;
     try self.gen_expr(right);

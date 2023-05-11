@@ -8,6 +8,7 @@ pub const NodeKind = enum {
     Sub,
     Mul,
     Div,
+    Neg,
     Num,
 };
 
@@ -59,22 +60,35 @@ pub fn expr(self: *Self) anyerror!*Node {
 }
 // mul = primary ("*|/" primary) *
 fn mul(self: *Self) anyerror!*Node {
-    var node = try self.primary();
+    var node = try self.unary();
     while (true) {
         if (self.cur_token.eql("*")) {
             self.advance();
-            const right_node = try self.primary();
+            const right_node = try self.unary();
             node = self.new_node(.{ .kind = .Mul, .lhs = node, .rhs = right_node });
             continue;
         }
         if (self.cur_token.eql("/")) {
             self.advance();
-            const right_node = try self.primary();
+            const right_node = try self.unary();
             node = self.new_node(.{ .kind = .Div, .lhs = node, .rhs = right_node });
             continue;
         }
         return node;
     }
+}
+
+fn unary(self: *Self) anyerror!*Node {
+    if (self.cur_token.eql("-")) {
+        self.advance();
+        const node = try self.unary();
+        return self.new_node(.{ .kind = .Neg, .lhs = node });
+    }
+    if (self.cur_token.eql("+")) {
+        self.advance();
+        return self.unary();
+    }
+    return self.primary();
 }
 
 fn primary(self: *Self) anyerror!*Node {
@@ -89,7 +103,7 @@ fn primary(self: *Self) anyerror!*Node {
         self.advance();
         return node;
     }
-    return self.cur_token.error_tok("expected an expression", .{});
+    return self.cur_token.error_tok("expected an expression\n", .{});
 }
 
 fn advance(self: *Self) void {
