@@ -63,6 +63,18 @@ pub fn gen_expr(self: *Self, node: *Node) !void {
             println("  cqo", .{});
             println("  idiv %rdi", .{});
         },
+        .Equal, .NotEqual, .LessThan, .LessEqual => {
+            println("  cmp %rdi, %rax", .{});
+            const opcode = switch (node.kind) {
+                .Equal => "sete",
+                .NotEqual => "setne",
+                .LessThan => "setl",
+                .LessEqual => "setle",
+                else => unreachable,
+            };
+            println("  {s} %al", .{opcode});
+            println("  movzb %al, %rax", .{});
+        },
         else => {
             return error.InvalidExpression;
         },

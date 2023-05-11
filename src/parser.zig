@@ -10,6 +10,11 @@ pub const NodeKind = enum {
     Div,
     Neg,
     Num,
+    Equal,
+    NotEqual,
+    LessThan,
+    LessEqual,
+    // Note: no > and >=
 };
 
 pub const Node = struct {
@@ -39,18 +44,65 @@ fn new_node(self: *Self, attr: Node) *Node {
     return node;
 }
 
-// expr = mul ("+"|"-" mul) *
 pub fn expr(self: *Self) anyerror!*Node {
+    return self.equality();
+}
+
+// equality = relational ( "==|!=" relational) *
+pub fn equality(self: *Self) anyerror!*Node {
+    var node = try self.relational();
+    while (true) {
+        if (self.cur_token_match("==")) {
+            const right = try self.relational();
+            node = self.new_node(.{ .kind = .Equal, .lhs = node, .rhs = right });
+            continue;
+        }
+        if (self.cur_token_match("!=")) {
+            const right = try self.relational();
+            node = self.new_node(.{ .kind = .NotEqual, .lhs = node, .rhs = right });
+            continue;
+        }
+        return node;
+    }
+}
+// relational = add ( "<|<=|>|>=" add) *
+pub fn relational(self: *Self) anyerror!*Node {
+    var node = try self.add();
+    while (true) {
+        if (self.cur_token_match("<")) {
+            const right = try self.add();
+            node = self.new_node(.{ .kind = .LessThan, .lhs = node, .rhs = right });
+            continue;
+        }
+        if (self.cur_token_match("<=")) {
+            const right = try self.add();
+            node = self.new_node(.{ .kind = .LessEqual, .lhs = node, .rhs = right });
+            continue;
+        }
+        if (self.cur_token_match(">")) {
+            const right = try self.add();
+            node = self.new_node(.{ .kind = .LessThan, .lhs = right, .rhs = node });
+            continue;
+        }
+        if (self.cur_token_match(">=")) {
+            const right = try self.add();
+            node = self.new_node(.{ .kind = .LessEqual, .lhs = right, .rhs = node });
+            continue;
+        }
+        return node;
+    }
+}
+
+// add = mul ("+"|"-" mul) *
+pub fn add(self: *Self) anyerror!*Node {
     var node = try self.mul();
     while (true) {
-        if (self.cur_token.eql("+")) {
-            self.advance();
+        if (self.cur_token_match("+")) {
             const right_node = try self.mul();
             node = self.new_node(.{ .kind = .Add, .lhs = node, .rhs = right_node });
             continue;
         }
-        if (self.cur_token.eql("-")) {
-            self.advance();
+        if (self.cur_token_match("-")) {
             const right_node = try self.mul();
             node = self.new_node(.{ .kind = .Sub, .lhs = node, .rhs = right_node });
             continue;
@@ -104,6 +156,14 @@ fn primary(self: *Self) anyerror!*Node {
         return node;
     }
     return self.cur_token.error_tok("expected an expression\n", .{});
+}
+
+fn cur_token_match(self: *Self, tok: []const u8) bool {
+    if (self.cur_token.eql(tok)) {
+        self.advance();
+        return true;
+    }
+    return false;
 }
 
 fn advance(self: *Self) void {

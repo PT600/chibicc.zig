@@ -49,7 +49,10 @@ fn isdigit(c: u8) bool {
 }
 
 fn ispunct(c: u8) bool {
-    return c == '+' or c == '-' or c == '*' or c == '/' or c == '(' or c == ')';
+    return switch (c) {
+        '+', '-', '*', '/', '(', ')', '=', '<', '>', '!' => true,
+        else => false,
+    };
 }
 
 const Self = @This();
@@ -108,11 +111,12 @@ pub fn tokenize(self: *Self) anyerror!*Token {
             continue;
         }
         if (ispunct(p[0])) {
-            const loc = p[0..1];
+            const punc_len: u8 = if (p[1] == '=') 2 else 1;
+            const loc = p[0..punc_len];
             const token = self.new_token(.{ .kind = .Punct, .loc = loc });
             cur.next = token;
             cur = token;
-            p += 1;
+            p += punc_len;
             continue;
         }
 
