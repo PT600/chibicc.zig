@@ -4,7 +4,7 @@ const Node = Parser.Node;
 const utils = @import("utils.zig");
 const println = utils.println;
 
-const GenError = error{ InvalidExpression, InvalidStmt };
+const GenError = error{ InvalidExpression, InvalidStmt, NotAnLvalue };
 
 const Self = @This();
 
@@ -28,11 +28,18 @@ pub fn gen(self: *Self, node: *Node) !void {
     println("  .globl main", .{});
     println("main:", .{});
 
+    //Prologue
+    println("  push %rbp", .{});
+    println("  mov %rsp, %rbp", .{});
+    println("  sub $208, %rsp", .{});
+
     var cur = node;
     while (cur.kind != .Eof) : (cur = cur.next) {
         try self.gen_stmt(cur);
         try utils.assert(self.depth == 0);
     }
+    println("  mov %rbp, %rsp", .{});
+    println("  pop %rbp", .{});
     println("  ret", .{});
 }
 
@@ -49,6 +56,7 @@ pub fn gen_stmt(self: *Self, node: *Node) !void {
 // pop the right to the %rdi from stack
 // eval the expr to the %rax
 pub fn gen_expr(self: *Self, node: *Node) !void {
+    std.log.debug("gen_expr for node: {}\n", .{node.kind});
     switch (node.kind) {
         .Num => {
             println("  mov ${d}, %rax", .{node.val});
@@ -59,14 +67,26 @@ pub fn gen_expr(self: *Self, node: *Node) !void {
             println(" neg %rax", .{});
             return;
         },
+        .Var => {
+            try self.gen_addr(node);
+            println("  mov (%rax), %rax", .{});
+            return;
+        },
+        .Assign => {
+            try self.gen_addr(node.lhs.?);
+            self.push();
+
+            try self.gen_expr(node.rhs.?);
+            self.pop("%rdi");
+            println("  mov %rax, (%rdi)", .{});
+            return;
+        },
         else => {},
     }
-    const right = node.rhs orelse return error.TokenError;
-    try self.gen_expr(right);
+    try self.gen_expr(node.rhs.?);
     self.push();
 
-    const left = node.lhs orelse return error.TokenError;
-    try self.gen_expr(left);
+    try self.gen_expr(node.lhs.?);
     self.pop("%rdi");
 
     switch (node.kind) {
@@ -98,5 +118,17 @@ pub fn gen_expr(self: *Self, node: *Node) !void {
         else => {
             return error.InvalidExpression;
         },
+    }
+}
+
+fn gen_addr(self: *Self, node: *Node) !void {
+    _ = self;
+    switch (node.kind) {
+        .Var => {
+            const name = node.name.?;
+            const offset = @as(i32, (name[0] - 'a' + 1) * 8);
+            println("  lea {d}(%rbp), %rax", .{-offset});
+        },
+        else => return error.NotAnLvalue,
     }
 }

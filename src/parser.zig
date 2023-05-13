@@ -16,6 +16,8 @@ pub const NodeKind = enum {
     LessEqual,
     Stmt,
     Eof,
+    Assign,
+    Var,
     // Note: no > and >=
 };
 
@@ -24,6 +26,7 @@ pub const Node = struct {
     next: *Node = undefined,
     lhs: ?*Node = null,
     rhs: ?*Node = null,
+    name: ?[]const u8 = null,
     val: i32 = 0,
 };
 
@@ -70,7 +73,20 @@ pub fn stmt(self: *Self) anyerror!*Node {
 }
 
 pub fn expr(self: *Self) anyerror!*Node {
-    return self.equality();
+    return self.assign();
+}
+
+// assign = identity (= assign)*
+fn assign(self: *Self) anyerror!*Node {
+    var node = try self.equality();
+    while (true) {
+        if (self.cur_token_match("=")) {
+            const right = try self.assign();
+            node = self.new_node(.{ .kind = .Assign, .lhs = node, .rhs = right });
+            continue;
+        }
+        return node;
+    }
 }
 
 // equality = relational ( "==|!=" relational) *
@@ -168,6 +184,7 @@ fn unary(self: *Self) anyerror!*Node {
     return self.primary();
 }
 
+// primary = "(" expr ")" | ident | num
 fn primary(self: *Self) anyerror!*Node {
     if (self.cur_token.eql("(")) {
         self.advance();
@@ -177,6 +194,11 @@ fn primary(self: *Self) anyerror!*Node {
     }
     if (self.cur_token.kind == .Num) {
         const node = self.new_node(.{ .kind = .Num, .val = self.cur_token.val });
+        self.advance();
+        return node;
+    }
+    if (self.cur_token.kind == .Ident) {
+        const node = self.new_node(.{ .kind = .Var, .name = self.cur_token.loc });
         self.advance();
         return node;
     }
@@ -193,4 +215,8 @@ fn cur_token_match(self: *Self, tok: []const u8) bool {
 
 fn advance(self: *Self) void {
     self.cur_token = self.cur_token.next;
+}
+
+fn peek(self: *Self) *Node {
+    return self.cur_token.next;
 }

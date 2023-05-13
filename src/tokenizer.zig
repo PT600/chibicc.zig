@@ -5,6 +5,7 @@ const errwriter = utils.errwriter;
 
 pub const TokenKind = enum {
     Punct,
+    Ident,
     Num,
     Eof,
 };
@@ -55,6 +56,9 @@ fn ispunct(c: u8) bool {
     };
 }
 
+fn isalpha(c: u8) bool {
+    return 'a' <= c and c <= 'z' or c == '_';
+}
 const Self = @This();
 
 allocator: std.mem.Allocator,
@@ -114,18 +118,23 @@ pub fn tokenize(self: *Self) anyerror!*Token {
             const val = try utils.strtol(p, &p);
             const len = @ptrToInt(p) - @ptrToInt(start);
             const loc = start[0..len];
-            const token = self.new_token(.{ .kind = .Num, .loc = loc, .val = val });
-            cur.next = token;
-            cur = token;
+            cur.next = self.new_token(.{ .kind = .Num, .loc = loc, .val = val });
+            cur = cur.next;
             continue;
         }
         if (ispunct(p[0])) {
             const punc_len: u8 = if (p[1] == '=') 2 else 1;
             const loc = p[0..punc_len];
-            const token = self.new_token(.{ .kind = .Punct, .loc = loc });
-            cur.next = token;
-            cur = token;
+            cur.next = self.new_token(.{ .kind = .Punct, .loc = loc });
+            cur = cur.next;
             p += punc_len;
+            continue;
+        }
+        if (isalpha(p[0])) {
+            const loc = p[0..1];
+            cur.next = self.new_token(.{ .kind = .Ident, .loc = loc });
+            cur = cur.next;
+            p += 1;
             continue;
         }
 
