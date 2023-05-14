@@ -14,11 +14,38 @@ pub const NodeKind = enum {
     NotEqual,
     LessThan,
     LessEqual,
+    // Note: no > and >=
     Stmt,
     Eof,
     Assign,
     Var,
-    // Note: no > and >=
+};
+
+pub const Obj = struct {
+    name: []const u8,
+    offset: usize = 0,
+    next: ?*Obj = null,
+};
+
+pub const Function = struct {
+    body: *Node,
+    locals: ?*Obj = null,
+    stack_size: usize = 0,
+
+    fn assign_lvar_offsets(self: *Function) void {
+        var offset: usize = 0;
+        var locals = self.locals;
+        while (locals) |l| {
+            offset += 8;
+            l.offset = offset;
+            locals = l.next;
+        }
+        self.stack_size = align_to(offset, 16);
+    }
+
+    fn align_to(n: usize, align_: usize) usize {
+        return (n + align_ - 1) / align_ * align_;
+    }
 };
 
 pub const Node = struct {
@@ -26,7 +53,7 @@ pub const Node = struct {
     next: *Node = undefined,
     lhs: ?*Node = null,
     rhs: ?*Node = null,
-    name: ?[]const u8 = null,
+    var_: ?*Obj = null,
     val: i32 = 0,
 };
 
@@ -36,6 +63,7 @@ allocator: std.mem.Allocator,
 tokenizer: *Tokenizer,
 cur_token: *Token,
 eof_node: *Node,
+locals: ?*Obj = null,
 
 pub fn init(allocator: std.mem.Allocator, tokenizer: *Tokenizer, cur_token: *Token) Self {
     var self = Self{
@@ -48,14 +76,22 @@ pub fn init(allocator: std.mem.Allocator, tokenizer: *Tokenizer, cur_token: *Tok
     return self;
 }
 
-pub fn parse(self: *Self) anyerror!*Node {
+pub fn parse(self: *Self) anyerror!*Function {
     var head = Node{ .kind = .Stmt };
     var cur = &head;
     while (self.cur_token.kind != .Eof) {
         cur.next = try self.stmt();
         cur = cur.next;
     }
-    return head.next;
+    return self.create_func(head.next);
+}
+
+fn create_func(self: *Self, body: *Node) anyerror!*Function {
+    const func = try self.allocator.create(Function);
+    func.body = body;
+    func.locals = self.locals;
+    func.assign_lvar_offsets();
+    return func;
 }
 
 fn new_node(self: *Self, attr: Node) *Node {
@@ -63,6 +99,14 @@ fn new_node(self: *Self, attr: Node) *Node {
     node.* = attr;
     node.next = self.eof_node;
     return node;
+}
+
+fn new_obj(self: *Self, attr: Obj) *Obj {
+    const obj = self.allocator.create(Obj) catch unreachable;
+    obj.* = attr;
+    obj.next = self.locals;
+    self.locals = obj;
+    return obj;
 }
 
 pub fn stmt(self: *Self) anyerror!*Node {
@@ -198,7 +242,8 @@ fn primary(self: *Self) anyerror!*Node {
         return node;
     }
     if (self.cur_token.kind == .Ident) {
-        const node = self.new_node(.{ .kind = .Var, .name = self.cur_token.loc });
+        const obj = self.find_var(self.cur_token) orelse self.new_obj(.{ .name = self.cur_token.loc });
+        const node = self.new_node(.{ .kind = .Var, .var_ = obj });
         self.advance();
         return node;
     }
@@ -219,4 +264,14 @@ fn advance(self: *Self) void {
 
 fn peek(self: *Self) *Node {
     return self.cur_token.next;
+}
+
+fn find_var(self: *Self, tok: *Token) ?*Obj {
+    var locals = self.locals;
+    while (locals) |l| {
+        if (tok.eql(l.name))
+            return l;
+        locals = l.next;
+    }
+    return null;
 }

@@ -79,10 +79,9 @@ pub fn init(allocator: std.mem.Allocator, source: [*:0]const u8) Self {
 pub fn debug_token(self: *Self, token: *Token) !void {
     var cur = token;
     while (cur != self.eof_token) {
-        try errwriter.print("{}: {s} | ", .{ cur.kind, cur.loc });
+        std.log.debug("{}: {s}", .{ cur.kind, cur.loc });
         cur = cur.next;
     }
-    try errwriter.print("\n", .{});
 }
 
 pub fn error_at(self: *Self, loc: [*]const u8, comptime format: []const u8, args: anytype) anyerror {
@@ -131,10 +130,15 @@ pub fn tokenize(self: *Self) anyerror!*Token {
             continue;
         }
         if (isalpha(p[0])) {
-            const loc = p[0..1];
+            var pp = p;
+            while (isalpha(pp[0]) or isdigit(pp[0])) {
+                pp += 1;
+            }
+            const end = @ptrToInt(pp) - @ptrToInt(p);
+            const loc = p[0..end];
             cur.next = self.new_token(.{ .kind = .Ident, .loc = loc });
             cur = cur.next;
-            p += 1;
+            p = pp;
             continue;
         }
 

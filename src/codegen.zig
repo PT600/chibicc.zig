@@ -125,9 +125,8 @@ fn gen_addr(self: *Self, node: *Node) !void {
     _ = self;
     switch (node.kind) {
         .Var => {
-            const name = node.name.?;
-            const offset = @as(i32, (name[0] - 'a' + 1) * 8);
-            println("  lea {d}(%rbp), %rax", .{-offset});
+            const offset = node.var_.?.offset;
+            println("  lea {d}(%rbp), %rax", .{-%offset});
         },
         else => return error.NotAnLvalue,
     }

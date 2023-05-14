@@ -18,8 +18,8 @@ pub fn main() !void {
     var tokenizer = Tokenizer.init(allocator, argv[1]);
     const token = try tokenizer.tokenize();
     var parser = Parser.init(allocator, &tokenizer, token);
-    const node = try parser.parse();
+    const func = try parser.parse();
     var codegen = Codegen.init();
 
-    try codegen.gen(node);
+    try codegen.gen(func.body);
 }
