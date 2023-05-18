@@ -136,12 +136,14 @@ fn new_obj(self: *Self, attr: Obj) *Obj {
 //      |  expr_stmt
 pub fn stmt(self: *Self) anyerror!*Node {
     if (self.cur_token_match("return")) {
-        return self.expr_stmt(.Return);
+        var node = try self.expr();
+        try self.cur_token_skip(";");
+        return self.new_node(.{ .kind = .Return, .lhs = node });
     }
     if (self.cur_token_match("{")) {
         return self.block_stmt();
     }
-    return self.expr_stmt(.Stmt);
+    return self.expr_stmt();
 }
 
 fn block_stmt(self: *Self) anyerror!*Node {
@@ -155,10 +157,15 @@ fn block_stmt(self: *Self) anyerror!*Node {
     return self.new_node(.{ .kind = .Block, .body = head.next });
 }
 
-fn expr_stmt(self: *Self, kind: NodeKind) anyerror!*Node {
+// expr-stmt = expr? ";"
+fn expr_stmt(self: *Self) anyerror!*Node {
+    if (self.cur_token.eql(";")) {
+        self.advance();
+        return self.new_node(.{ .kind = .Block });
+    }
     var node = try self.expr();
     try self.cur_token_skip(";");
-    return self.new_node(.{ .kind = kind, .lhs = node });
+    return self.new_node(.{ .kind = .Stmt, .lhs = node });
 }
 
 pub fn expr(self: *Self) anyerror!*Node {

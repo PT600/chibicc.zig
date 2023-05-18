@@ -54,10 +54,12 @@ pub fn gen_stmt(self: *Self, node: *Node) !void {
             return self.gen_expr(expr_node);
         },
         .Block => {
-            var cur = node.body.?;
-            while (cur.kind != .Eof) : (cur = cur.next) {
-                try self.gen_stmt(cur);
-                try utils.assert(self.depth == 0);
+            if (node.body) |body| {
+                var cur = body;
+                while (cur.kind != .Eof) : (cur = cur.next) {
+                    try self.gen_stmt(cur);
+                    try utils.assert(self.depth == 0);
+                }
             }
         },
         else => return error.InvalidStmt,
