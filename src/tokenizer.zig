@@ -6,6 +6,7 @@ const errwriter = utils.errwriter;
 pub const TokenKind = enum {
     Punct,
     Ident,
+    Keyword,
     Num,
     Eof,
 };
@@ -136,8 +137,13 @@ pub fn tokenize(self: *Self) anyerror!*Token {
             }
             const end = @ptrToInt(pp) - @ptrToInt(p);
             const loc = p[0..end];
-            cur.next = self.new_token(.{ .kind = .Ident, .loc = loc });
+            var kind = TokenKind.Ident;
+            if (std.mem.eql(u8, loc, "return")) {
+                kind = TokenKind.Keyword;
+            }
+            cur.next = self.new_token(.{ .kind = kind, .loc = loc });
             cur = cur.next;
+            convert_keyword(cur);
             p = pp;
             continue;
         }
@@ -146,4 +152,10 @@ pub fn tokenize(self: *Self) anyerror!*Token {
     }
     try self.debug_token(head.next);
     return head.next;
+}
+
+pub fn convert_keyword(self: *Token) void {
+    if (std.mem.eql(u8, self.loc, "return")) {
+        self.kind = .Keyword;
+    }
 }

@@ -38,17 +38,25 @@ pub fn gen(self: *Self, node: *Node) !void {
         try self.gen_stmt(cur);
         try utils.assert(self.depth == 0);
     }
+    println(".L.return:", .{});
     println("  mov %rbp, %rsp", .{});
     println("  pop %rbp", .{});
     println("  ret", .{});
 }
 
 pub fn gen_stmt(self: *Self, node: *Node) !void {
-    if (node.kind == .Stmt) {
-        const expr_node = node.lhs.?;
-        return self.gen_expr(expr_node);
+    switch (node.kind) {
+        .Return => {
+            const expr_node = node.lhs.?;
+            try self.gen_expr(expr_node);
+            println("  jmp .L.return", .{});
+        },
+        .Stmt => {
+            const expr_node = node.lhs.?;
+            return self.gen_expr(expr_node);
+        },
+        else => return error.InvalidStmt,
     }
-    return error.InvalidStmt;
 }
 
 // push right to the stack

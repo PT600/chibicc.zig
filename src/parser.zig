@@ -18,6 +18,7 @@ pub const NodeKind = enum {
     Stmt,
     Eof,
     Assign,
+    Return,
     Var,
 };
 
@@ -110,10 +111,17 @@ fn new_obj(self: *Self, attr: Obj) *Obj {
 }
 
 pub fn stmt(self: *Self) anyerror!*Node {
+    if (self.cur_token_match("return")) {
+        return self.expr_stmt(.Return);
+    }
+    return self.expr_stmt(.Stmt);
+}
+
+fn expr_stmt(self: *Self, kind: NodeKind) anyerror!*Node {
     var node = try self.expr();
     _ = try self.cur_token.skip(";");
     self.advance();
-    return self.new_node(.{ .kind = .Stmt, .lhs = node });
+    return self.new_node(.{ .kind = kind, .lhs = node });
 }
 
 pub fn expr(self: *Self) anyerror!*Node {
