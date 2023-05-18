@@ -52,7 +52,7 @@ fn isdigit(c: u8) bool {
 
 fn ispunct(c: u8) bool {
     return switch (c) {
-        '+', '-', '*', '/', '(', ')', '=', '<', '>', '!', ';' => true,
+        '+', '-', '*', '/', '(', ')', '=', '<', '>', '!', ';', '{', '}' => true,
         else => false,
     };
 }
@@ -67,6 +67,7 @@ source: [*:0]const u8,
 eof_token: *Token,
 
 pub fn init(allocator: std.mem.Allocator, source: [*:0]const u8) Self {
+    std.log.info("source: .{s}", .{source});
     const token = allocator.create(Token) catch unreachable;
     token.kind = .Eof;
     token.loc = "";

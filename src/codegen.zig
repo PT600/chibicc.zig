@@ -1,6 +1,7 @@
 const std = @import("std");
 const Parser = @import("parser.zig");
 const Node = Parser.Node;
+const Function = Parser.Function;
 const utils = @import("utils.zig");
 const println = utils.println;
 
@@ -24,20 +25,17 @@ pub fn pop(self: *Self, arg: []const u8) void {
     self.depth -= 1;
 }
 
-pub fn gen(self: *Self, node: *Node) !void {
+pub fn gen(self: *Self, prog: *Function) !void {
     println("  .globl main", .{});
     println("main:", .{});
 
     //Prologue
     println("  push %rbp", .{});
     println("  mov %rsp, %rbp", .{});
-    println("  sub $208, %rsp", .{});
+    println("  sub ${d}, %rsp", .{prog.stack_size});
 
-    var cur = node;
-    while (cur.kind != .Eof) : (cur = cur.next) {
-        try self.gen_stmt(cur);
-        try utils.assert(self.depth == 0);
-    }
+    try self.gen_stmt(prog.body);
+    try utils.assert(self.depth == 0);
     println(".L.return:", .{});
     println("  mov %rbp, %rsp", .{});
     println("  pop %rbp", .{});
@@ -54,6 +52,13 @@ pub fn gen_stmt(self: *Self, node: *Node) !void {
         .Stmt => {
             const expr_node = node.lhs.?;
             return self.gen_expr(expr_node);
+        },
+        .Block => {
+            var cur = node.body.?;
+            while (cur.kind != .Eof) : (cur = cur.next) {
+                try self.gen_stmt(cur);
+                try utils.assert(self.depth == 0);
+            }
         },
         else => return error.InvalidStmt,
     }
@@ -134,7 +139,7 @@ fn gen_addr(self: *Self, node: *Node) !void {
     switch (node.kind) {
         .Var => {
             const offset = node.var_.?.offset;
-            println("  lea {d}(%rbp), %rax", .{-%offset});
+            println("  lea -{d}(%rbp), %rax", .{offset});
         },
         else => return error.NotAnLvalue,
     }

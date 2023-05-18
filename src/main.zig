@@ -21,5 +21,5 @@ pub fn main() !void {
     const func = try parser.parse();
     var codegen = Codegen.init();
 
-    try codegen.gen(func.body);
+    try codegen.gen(func);
 }

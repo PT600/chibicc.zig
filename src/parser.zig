@@ -3,7 +3,7 @@ const utils = @import("utils.zig");
 const Tokenizer = @import("tokenizer.zig");
 const Token = Tokenizer.Token;
 
-pub const NodeKind = enum {
+pub const NodeKind = enum(u8) {
     Add,
     Sub,
     Mul,
@@ -19,6 +19,7 @@ pub const NodeKind = enum {
     Eof,
     Assign,
     Return,
+    Block,
     Var,
 };
 
@@ -49,13 +50,32 @@ pub const Function = struct {
     }
 };
 
+const TABS = "                                    ";
 pub const Node = struct {
     kind: NodeKind,
     next: *Node = undefined,
     lhs: ?*Node = null,
     rhs: ?*Node = null,
+    body: ?*Node = null,
     var_: ?*Obj = null,
     val: i32 = 0,
+
+    fn debug(self: *Node, depth: u8) void {
+        const tab = TABS[0..(depth * 2)];
+        std.log.info("{s} {}", .{ tab, self.kind });
+        if (self.lhs) |lhs| {
+            std.log.info("{s} lhs:", .{tab});
+            lhs.debug(depth + 1);
+        }
+        if (self.rhs) |rhs| {
+            std.log.info("{s} rhs:", .{tab});
+            rhs.debug(depth + 1);
+        }
+        if (self.body) |body| {
+            std.log.info("{s} body:", .{tab});
+            body.debug(depth + 1);
+        }
+    }
 };
 
 const Self = @This();
@@ -84,6 +104,7 @@ pub fn parse(self: *Self) anyerror!*Function {
         cur.next = try self.stmt();
         cur = cur.next;
     }
+    head.next.debug(0);
     return self.create_func(head.next);
 }
 
@@ -110,17 +131,33 @@ fn new_obj(self: *Self, attr: Obj) *Obj {
     return obj;
 }
 
+// stmt = "return" expr ";"
+//      |  "{" compound_stmt "}"
+//      |  expr_stmt
 pub fn stmt(self: *Self) anyerror!*Node {
     if (self.cur_token_match("return")) {
         return self.expr_stmt(.Return);
     }
+    if (self.cur_token_match("{")) {
+        return self.block_stmt();
+    }
     return self.expr_stmt(.Stmt);
+}
+
+fn block_stmt(self: *Self) anyerror!*Node {
+    var head = Node{ .kind = .Stmt };
+    var cur = &head;
+    while (!self.cur_token.eql("}")) {
+        cur.next = try self.stmt();
+        cur = cur.next;
+    }
+    try self.cur_token_skip("}");
+    return self.new_node(.{ .kind = .Block, .body = head.next });
 }
 
 fn expr_stmt(self: *Self, kind: NodeKind) anyerror!*Node {
     var node = try self.expr();
-    _ = try self.cur_token.skip(";");
-    self.advance();
+    try self.cur_token_skip(";");
     return self.new_node(.{ .kind = kind, .lhs = node });
 }
 
@@ -264,6 +301,10 @@ fn cur_token_match(self: *Self, tok: []const u8) bool {
         return true;
     }
     return false;
+}
+
+fn cur_token_skip(self: *Self, tok: []const u8) !void {
+    self.cur_token = try self.cur_token.skip(tok);
 }
 
 fn advance(self: *Self) void {
