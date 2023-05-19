@@ -10,9 +10,10 @@ const GenError = error{ InvalidExpression, InvalidStmt, NotAnLvalue };
 const Self = @This();
 
 depth: u32,
+if_count: u8,
 
 pub fn init() Self {
-    return Self{ .depth = 0 };
+    return Self{ .depth = 0, .if_count = 0 };
 }
 
 pub fn push(self: *Self) void {
@@ -61,6 +62,21 @@ pub fn gen_stmt(self: *Self, node: *Node) !void {
                     try utils.assert(self.depth == 0);
                 }
             }
+        },
+        .If => {
+            const c = self.if_count;
+            self.if_count += 1;
+            const cond = node.cond.?;
+            try self.gen_expr(cond);
+            println("cmp $0, %eax", .{});
+            println("je .L.else.{d}", .{c});
+            try self.gen_stmt(node.then.?);
+            println("je .L.end.{d}", .{c});
+            println(".L.else.{d}:", .{c});
+            if (node.els) |els| {
+                try self.gen_stmt(els);
+            }
+            println(".L.end.{d}:", .{c});
         },
         else => return error.InvalidStmt,
     }

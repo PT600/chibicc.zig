@@ -60,6 +60,21 @@ fn ispunct(c: u8) bool {
 fn isalpha(c: u8) bool {
     return 'a' <= c and c <= 'z' or c == '_';
 }
+
+const KEYWORDS = [_][]const u8{
+    "return",
+    "if",
+    "else",
+};
+
+fn is_keyword(word: []const u8) bool {
+    for (KEYWORDS) |keyword| {
+        if (std.mem.eql(u8, keyword, word))
+            return true;
+    }
+    return false;
+}
+
 const Self = @This();
 
 allocator: std.mem.Allocator,
@@ -139,9 +154,6 @@ pub fn tokenize(self: *Self) anyerror!*Token {
             const end = @ptrToInt(pp) - @ptrToInt(p);
             const loc = p[0..end];
             var kind = TokenKind.Ident;
-            if (std.mem.eql(u8, loc, "return")) {
-                kind = TokenKind.Keyword;
-            }
             cur.next = self.new_token(.{ .kind = kind, .loc = loc });
             cur = cur.next;
             convert_keyword(cur);
@@ -156,7 +168,7 @@ pub fn tokenize(self: *Self) anyerror!*Token {
 }
 
 pub fn convert_keyword(self: *Token) void {
-    if (std.mem.eql(u8, self.loc, "return")) {
+    if (is_keyword(self.loc)) {
         self.kind = .Keyword;
     }
 }
