@@ -17,6 +17,7 @@ pub const NodeKind = enum(u8) {
     // Note: no > and >=
     Stmt,
     If,
+    For,
     Eof,
     Assign,
     Return,
@@ -64,6 +65,9 @@ pub const Node = struct {
     cond: ?*Node = null,
     then: ?*Node = null,
     els: ?*Node = null,
+
+    init: ?*Node = null,
+    inc: ?*Node = null,
     var_: ?*Obj = null,
     val: i32 = 0,
 
@@ -140,6 +144,7 @@ fn new_obj(self: *Self, attr: Obj) *Obj {
 
 // stmt = "return" expr ";"
 //      | "if" (expr) stmt (else stmt)?
+//      | "for"(init?;cond?;inc?) stmt
 //      |  "{" compound_stmt "}"
 //      |  expr_stmt
 pub fn stmt(self: *Self) anyerror!*Node {
@@ -158,6 +163,21 @@ pub fn stmt(self: *Self) anyerror!*Node {
         else
             null;
         return self.new_node(.{ .kind = .If, .cond = cond, .then = then, .els = els });
+    }
+    if (self.cur_token_match("for")) {
+        try self.cur_token_skip("(");
+        var node = self.new_node(.{ .kind = .For });
+        node.init = try self.expr_stmt();
+        if (!self.cur_token_match(";")) {
+            node.cond = try self.expr();
+            try self.cur_token_skip(";");
+        }
+        if (!self.cur_token_match(")")) {
+            node.inc = try self.expr();
+            try self.cur_token_skip(")");
+        }
+        node.then = try self.stmt();
+        return node;
     }
     if (self.cur_token_match("{")) {
         return self.block_stmt();

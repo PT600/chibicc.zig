@@ -10,10 +10,10 @@ const GenError = error{ InvalidExpression, InvalidStmt, NotAnLvalue };
 const Self = @This();
 
 depth: u32,
-if_count: u8,
+count: u8,
 
 pub fn init() Self {
-    return Self{ .depth = 0, .if_count = 0 };
+    return Self{ .depth = 0, .count = 0 };
 }
 
 pub fn push(self: *Self) void {
@@ -64,8 +64,7 @@ pub fn gen_stmt(self: *Self, node: *Node) !void {
             }
         },
         .If => {
-            const c = self.if_count;
-            self.if_count += 1;
+            const c = self.inc_count();
             const cond = node.cond.?;
             try self.gen_expr(cond);
             println("cmp $0, %eax", .{});
@@ -78,8 +77,32 @@ pub fn gen_stmt(self: *Self, node: *Node) !void {
             }
             println(".L.end.{d}:", .{c});
         },
+        .For => {
+            const c = self.inc_count();
+            if (node.init) |init_| {
+                try self.gen_stmt(init_);
+            }
+            println(".L.begin.{d}:", .{c});
+            if (node.cond) |cond| {
+                try self.gen_expr(cond);
+                println("cmp $0, %eax", .{});
+                println("je .L.end.{d}", .{c});
+            }
+            try self.gen_stmt(node.then.?);
+            if (node.inc) |inc| {
+                try self.gen_expr(inc);
+            }
+            println("jmp .L.begin.{d}", .{c});
+            println(".L.end.{d}:", .{c});
+        },
         else => return error.InvalidStmt,
     }
+}
+
+fn inc_count(self: *Self) u8 {
+    const c = self.count;
+    self.count += 1;
+    return c;
 }
 
 // push right to the stack
