@@ -95,6 +95,16 @@ pub fn gen_stmt(self: *Self, node: *Node) !void {
             println("jmp .L.begin.{d}", .{c});
             println(".L.end.{d}:", .{c});
         },
+        .While => {
+            const c = self.inc_count();
+            println(".L.begin.{d}:", .{c});
+            try self.gen_expr(node.cond.?);
+            println("cmp $0, %eax", .{});
+            println("je .L.end.{d}", .{c});
+            try self.gen_stmt(node.body.?);
+            println("jmp .L.begin.{d}", .{c});
+            println(".L.end.{d}:", .{c});
+        },
         else => return error.InvalidStmt,
     }
 }
@@ -110,7 +120,7 @@ fn inc_count(self: *Self) u8 {
 // pop the right to the %rdi from stack
 // eval the expr to the %rax
 pub fn gen_expr(self: *Self, node: *Node) !void {
-    std.log.debug("gen_expr for node: {}\n", .{node.kind});
+    std.log.debug("gen_expr for node: {}", .{node.kind});
     switch (node.kind) {
         .Num => {
             println("  mov ${d}, %rax", .{node.val});

@@ -18,6 +18,7 @@ pub const NodeKind = enum(u8) {
     Stmt,
     If,
     For,
+    While,
     Eof,
     Assign,
     Return,
@@ -145,6 +146,7 @@ fn new_obj(self: *Self, attr: Obj) *Obj {
 // stmt = "return" expr ";"
 //      | "if" (expr) stmt (else stmt)?
 //      | "for"(init?;cond?;inc?) stmt
+//      | "while (cond) stmt
 //      |  "{" compound_stmt "}"
 //      |  expr_stmt
 pub fn stmt(self: *Self) anyerror!*Node {
@@ -178,6 +180,13 @@ pub fn stmt(self: *Self) anyerror!*Node {
         }
         node.then = try self.stmt();
         return node;
+    }
+    if (self.cur_token_match("while")) {
+        try self.cur_token_skip("(");
+        const cond = try self.expr();
+        try self.cur_token_skip(")");
+        const body = try self.stmt();
+        return self.new_node(.{ .kind = .While, .cond = cond, .body = body });
     }
     if (self.cur_token_match("{")) {
         return self.block_stmt();
