@@ -132,9 +132,57 @@ pub fn parse(self: *Self) anyerror!*Function {
         cur.next = node;
         cur = node;
     }
-    const node = head.next.?;
+    var node = head.next.?;
+    self.add_type(node);
+    try self.fix_pointer_arithmetic(node, &head.next.?);
     node.debug(0);
     return self.create_func(node);
+}
+
+fn fix_pointer_arithmetic(self: *Self, node: *Node, node_addr: **Node) !void {
+    if (node.lhs) |*lhs| {
+        try self.fix_pointer_arithmetic(lhs.*, lhs);
+    }
+    if (node.rhs) |*rhs| {
+        try self.fix_pointer_arithmetic(rhs.*, rhs);
+    }
+    var body = node.body;
+    while (body) |*b| {
+        try self.fix_pointer_arithmetic(b.*, b);
+        body = b.*.next;
+    }
+    switch (node.kind) {
+        .Add => {
+            var lhs = node.lhs.?;
+            var rhs = node.rhs.?;
+            std.log.debug("********************, Add: {}, {}", .{ lhs.ty.kind, rhs.ty.kind });
+            if (lhs.is_ty_integer() and rhs.is_ty_pointer()) {
+                const tmp = lhs;
+                lhs = rhs;
+                rhs = tmp;
+            }
+            if (lhs.is_ty_pointer() and rhs.is_ty_integer()) {
+                const new_rhs = self.new_node(.{ .kind = .Mul, .lhs = self.scaler, .rhs = rhs, .ty = self.pointer_to(lhs.ty) });
+                node.rhs = new_rhs;
+            }
+        },
+        .Sub => {
+            var lhs = node.lhs.?;
+            var rhs = node.rhs.?;
+            std.log.debug("********************, Sub: {}, {}", .{ lhs.ty.kind, rhs.ty.kind });
+            if (lhs.is_ty_pointer() and rhs.is_ty_integer()) {
+                const new_rhs = self.new_node(.{ .kind = .Mul, .lhs = self.scaler, .rhs = rhs, .ty = Type.TYPE_INT });
+                node.rhs = new_rhs;
+            }
+            if (lhs.is_ty_pointer() and rhs.is_ty_pointer()) {
+                const sub = self.new_node(.{ .kind = .Sub, .lhs = lhs, .rhs = rhs, .ty = Type.TYPE_INT });
+                node_addr.* = self.new_node(.{ .kind = .Div, .lhs = sub, .rhs = self.scaler, .ty = Type.TYPE_INT });
+            }
+        },
+        else => {
+            std.log.debug("node.kind: {}", .{node.kind});
+        },
+    }
 }
 
 fn new_add(self: *Self, lhs: *Node, rhs: *Node) !*Node {
@@ -252,7 +300,7 @@ fn block_stmt(self: *Self) anyerror!*Node {
         var node = try self.stmt();
         cur.next = node;
         cur = node;
-        self.add_type(cur);
+        //self.add_type(cur);
     }
     try self.cur_token_skip("}");
     return self.new_node(.{ .kind = .Block, .body = head.next });
@@ -337,14 +385,14 @@ pub fn add(self: *Self) anyerror!*Node {
     while (true) {
         if (self.cur_token_match("+")) {
             const right_node = try self.mul();
-            //node = self.new_node(.{ .kind = .Add, .lhs = node, .rhs = right_node });
-            node = try self.new_add(node, right_node);
+            node = self.new_node(.{ .kind = .Add, .lhs = node, .rhs = right_node });
+            //node = try self.new_add(node, right_node);
             continue;
         }
         if (self.cur_token_match("-")) {
             const right_node = try self.mul();
-            //node = self.new_node(.{ .kind = .Sub, .lhs = node, .rhs = right_node });
-            node = try self.new_sub(node, right_node);
+            node = self.new_node(.{ .kind = .Sub, .lhs = node, .rhs = right_node });
+            //node = try self.new_sub(node, right_node);
             continue;
         }
         return node;
