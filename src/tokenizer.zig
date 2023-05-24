@@ -52,7 +52,7 @@ fn isdigit(c: u8) bool {
 
 fn ispunct(c: u8) bool {
     return switch (c) {
-        '+', '-', '*', '/', '(', ')', '=', '<', '>', '!', ';', '{', '}' => true,
+        '+', '-', '*', '/', '(', ')', '=', '<', '>', '!', ';', '{', '}', '&' => true,
         else => false,
     };
 }
@@ -84,7 +84,7 @@ source: [*:0]const u8,
 eof_token: *Token,
 
 pub fn init(allocator: std.mem.Allocator, source: [*:0]const u8) Self {
-    std.log.info("source: .{s}", .{source});
+    std.log.info("source: {s}", .{source});
     const token = allocator.create(Token) catch unreachable;
     token.kind = .Eof;
     token.loc = "";
@@ -141,7 +141,7 @@ pub fn tokenize(self: *Self) anyerror!*Token {
             continue;
         }
         if (ispunct(p[0])) {
-            const punc_len: u8 = if (p[1] == '=') 2 else 1;
+            const punc_len: u8 = if (p[1] == '=' and (p[0] == '=' or p[0] == '!' or p[0] == '>' or p[0] == '<')) 2 else 1;
             const loc = p[0..punc_len];
             cur.next = self.new_token(.{ .kind = .Punct, .loc = loc });
             cur = cur.next;

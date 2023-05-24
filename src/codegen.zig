@@ -26,7 +26,7 @@ pub fn pop(self: *Self, arg: []const u8) void {
     self.depth -= 1;
 }
 
-pub fn gen(self: *Self, prog: *Function) !void {
+pub fn gen(self: *Self, prog: *Function) anyerror!void {
     println("  .globl main", .{});
     println("main:", .{});
 
@@ -43,7 +43,8 @@ pub fn gen(self: *Self, prog: *Function) !void {
     println("  ret", .{});
 }
 
-pub fn gen_stmt(self: *Self, node: *Node) !void {
+pub fn gen_stmt(self: *Self, node: *Node) anyerror!void {
+    std.log.debug("gen_stmt, {}", .{node.kind});
     switch (node.kind) {
         .Return => {
             const expr_node = node.lhs.?;
@@ -55,12 +56,11 @@ pub fn gen_stmt(self: *Self, node: *Node) !void {
             return self.gen_expr(expr_node);
         },
         .Block => {
-            if (node.body) |body| {
-                var cur = body;
-                while (cur.kind != .Eof) : (cur = cur.next) {
-                    try self.gen_stmt(cur);
-                    try utils.assert(self.depth == 0);
-                }
+            var cur = node.body;
+            while (cur) |body| {
+                try self.gen_stmt(body);
+                try utils.assert(self.depth == 0);
+                cur = body.next;
             }
         },
         .If => {
@@ -119,7 +119,7 @@ fn inc_count(self: *Self) u8 {
 // set left to the %rax
 // pop the right to the %rdi from stack
 // eval the expr to the %rax
-pub fn gen_expr(self: *Self, node: *Node) !void {
+pub fn gen_expr(self: *Self, node: *Node) anyerror!void {
     std.log.debug("gen_expr for node: {}", .{node.kind});
     switch (node.kind) {
         .Num => {
@@ -129,6 +129,15 @@ pub fn gen_expr(self: *Self, node: *Node) !void {
         .Neg => {
             try self.gen_expr(node.lhs.?);
             println(" neg %rax", .{});
+            return;
+        },
+        .Addr => {
+            try self.gen_addr(node.lhs.?);
+            return;
+        },
+        .Deref => {
+            try self.gen_expr(node.lhs.?);
+            println(" mov (%rax), %rax", .{});
             return;
         },
         .Var => {
@@ -185,12 +194,15 @@ pub fn gen_expr(self: *Self, node: *Node) !void {
     }
 }
 
-fn gen_addr(self: *Self, node: *Node) !void {
-    _ = self;
+fn gen_addr(self: *Self, node: *Node) anyerror!void {
+    //_ = self;
     switch (node.kind) {
         .Var => {
             const offset = node.var_.?.offset;
             println("  lea -{d}(%rbp), %rax", .{offset});
+        },
+        .Deref => {
+            try self.gen_expr(node.lhs.?);
         },
         else => return error.NotAnLvalue,
     }
