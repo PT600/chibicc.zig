@@ -33,6 +33,7 @@ pub const Obj = struct {
     name: []const u8,
     offset: usize = 0,
     next: ?*Obj = null,
+    ty: *Type = &Type.TYPE_NONE,
 };
 
 pub const Function = struct {
@@ -74,14 +75,14 @@ pub const Node = struct {
     inc: ?*Node = null,
     var_: ?*Obj = null,
     val: i32 = 0,
-    ty: *const Type = Type.TYPE_NONE,
+    ty: *Type = &Type.TYPE_NONE,
 
     fn is_ty_integer(self: *Node) bool {
-        return self.ty != Type.TYPE_NONE and self.ty.kind == .Int;
+        return self.ty.kind != .None and self.ty.kind == .Int;
     }
 
     fn is_ty_pointer(self: *Node) bool {
-        return self.ty != Type.TYPE_NONE and self.ty.kind == .Ptr;
+        return self.ty.kind != .None and self.ty.kind == .Ptr;
     }
 
     fn debug(self: *Node, depth: u8) void {
@@ -166,7 +167,7 @@ fn new_sub(self: *Self, lhs: *Node, rhs: *Node) !*Node {
         return self.new_node(.{ .kind = .Sub, .lhs = lhs, .rhs = new_rhs, .ty = lhs.ty });
     }
     if (lhs.is_ty_pointer() and rhs.is_ty_pointer()) {
-        const node = self.new_node(.{ .kind = .Sub, .lhs = lhs, .rhs = rhs, .ty = Type.TYPE_INT });
+        const node = self.new_node(.{ .kind = .Sub, .lhs = lhs, .rhs = rhs, .ty = &Type.TYPE_INT });
         return self.new_node(.{ .kind = .Div, .lhs = node, .rhs = self.scaler });
     }
     return error.TokenError;
@@ -183,10 +184,11 @@ fn create_func(self: *Self, body: *Node) anyerror!*Function {
 fn new_node(self: *Self, attr: Node) *Node {
     const node = self.allocator.create(Node) catch unreachable;
     node.* = attr;
+    std.log.debug("new node,ty: {}", .{node.ty});
     return node;
 }
 
-fn new_obj(self: *Self, attr: Obj) *Obj {
+fn new_lvar(self: *Self, attr: Obj) *Obj {
     const obj = self.allocator.create(Obj) catch unreachable;
     obj.* = attr;
     obj.next = self.locals;
@@ -245,17 +247,63 @@ pub fn stmt(self: *Self) anyerror!*Node {
     return self.expr_stmt();
 }
 
+// block_stmt = (declaration | stmt)* "}"
 fn block_stmt(self: *Self) anyerror!*Node {
     var head = Node{ .kind = .Stmt };
     var cur = &head;
     while (!self.cur_token.eql("}")) {
-        var node = try self.stmt();
+        var node = if (self.cur_token.eql("int"))
+            try self.declaration()
+        else
+            try self.stmt();
+
         cur.next = node;
         cur = node;
         self.add_type(cur);
     }
     try self.cur_token_skip("}");
     return self.new_node(.{ .kind = .Block, .body = head.next });
+}
+
+// declaration = declspec declarator ("=" expr)? ("," declarator ("=" expr)?)* ";"
+fn declaration(self: *Self) anyerror!*Node {
+    const basety = try self.declspec();
+
+    var head = Node{ .kind = .Block };
+    var cur = &head;
+    while (!self.cur_token_match(";")) {
+        const ty = try self.declarator(basety);
+        var var_ = self.new_lvar(.{ .ty = ty, .name = ty.name.loc });
+        if (self.cur_token_match("=")) {
+            const rhs = try self.assign();
+            const lhs = self.new_node(.{ .kind = .Var, .var_ = var_ });
+            const assign_node = self.new_node(.{ .kind = .Assign, .lhs = lhs, .rhs = rhs });
+            const node = self.new_node(.{ .kind = .Stmt, .lhs = assign_node });
+            cur.next = node;
+            cur = node;
+        }
+    }
+    const node = self.new_node(.{ .kind = .Block, .body = head.next });
+    return node;
+}
+
+fn declspec(self: *Self) !*Type {
+    try self.cur_token_skip("int");
+    return &Type.TYPE_INT;
+}
+
+// declarator = "*" * Ident
+fn declarator(self: *Self, base: *Type) !*Type {
+    _ = self.cur_token_match(",");
+    var ty = base;
+    while (self.cur_token_match("*")) {
+        ty = self.pointer_to(ty);
+    }
+    if (self.cur_token.kind != .Ident)
+        return self.cur_token.error_tok("expect a variable name", .{});
+    ty.name = self.cur_token;
+    self.advance();
+    return ty;
 }
 
 // expr-stmt = expr? ";"
@@ -404,7 +452,7 @@ fn primary(self: *Self) anyerror!*Node {
         return node;
     }
     if (self.cur_token.kind == .Ident) {
-        const obj = self.find_var(self.cur_token) orelse self.new_obj(.{ .name = self.cur_token.loc });
+        const obj = self.find_var(self.cur_token) orelse self.new_lvar(.{ .name = self.cur_token.loc });
         const node = self.new_node(.{ .kind = .Var, .var_ = obj });
         self.advance();
         return node;
@@ -474,14 +522,14 @@ fn add_type0(self: *Self, node: *Node) void {
             node.ty = self.pointer_to(node.lhs.?.ty);
         },
         .Equal, .NotEqual, .LessThan, .LessEqual, .Var, .Num => {
-            node.ty = Type.TYPE_INT;
+            node.ty = &Type.TYPE_INT;
         },
         .Deref => {
             const lhs = node.lhs.?;
             if (lhs.ty.kind == .Ptr) {
                 node.ty = lhs.ty.base.?;
             } else {
-                node.ty = Type.TYPE_INT;
+                node.ty = &Type.TYPE_INT;
             }
         },
         else => return,
@@ -489,12 +537,13 @@ fn add_type0(self: *Self, node: *Node) void {
     std.log.debug("add_type0 end: {}, {}", .{ node.kind, node.ty });
 }
 
-fn pointer_to(self: *Self, base: *const Type) *Type {
+fn pointer_to(self: *Self, base: *Type) *Type {
     return self.new_type(.{ .kind = .Ptr, .base = base });
 }
 
 fn new_type(self: *Self, attr: Type) *Type {
     var ty = self.allocator.create(Type) catch unreachable;
+    ty.name = &Token.eof_token;
     ty.* = attr;
     return ty;
 }

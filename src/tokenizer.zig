@@ -12,6 +12,7 @@ pub const TokenKind = enum {
 };
 
 pub const Token = struct {
+    pub var eof_token = Token{ .kind = .Eof, .loc = "" };
     kind: TokenKind,
     loc: []const u8,
     next: *Token = undefined,
@@ -52,7 +53,7 @@ fn isdigit(c: u8) bool {
 
 fn ispunct(c: u8) bool {
     return switch (c) {
-        '+', '-', '*', '/', '(', ')', '=', '<', '>', '!', ';', '{', '}', '&' => true,
+        '+', '-', '*', '/', '(', ')', '=', '<', '>', '!', ';', '{', '}', '&', ',' => true,
         else => false,
     };
 }
@@ -81,23 +82,19 @@ const Self = @This();
 
 allocator: std.mem.Allocator,
 source: [*:0]const u8,
-eof_token: *Token,
 
 pub fn init(allocator: std.mem.Allocator, source: [*:0]const u8) Self {
     std.log.info("source: {s}", .{source});
-    const token = allocator.create(Token) catch unreachable;
-    token.kind = .Eof;
-    token.loc = "";
     return Self{
         .allocator = allocator,
         .source = source,
-        .eof_token = token,
     };
 }
 
 pub fn debug_token(self: *Self, token: *Token) !void {
+    _ = self;
     var cur = token;
-    while (cur != self.eof_token) {
+    while (cur.kind != .Eof) {
         std.log.debug("{}: {s}", .{ cur.kind, cur.loc });
         cur = cur.next;
     }
@@ -117,7 +114,7 @@ pub fn error_at(self: *Self, loc: [*]const u8, comptime format: []const u8, args
 fn new_token(self: *Self, attr: Token) *Token {
     const token = self.allocator.create(Token) catch unreachable;
     token.* = attr;
-    token.next = self.eof_token;
+    token.next = &Token.eof_token;
     return token;
 }
 
@@ -130,7 +127,6 @@ pub fn tokenize(self: *Self) anyerror!*Token {
             p += 1;
             continue;
         }
-
         if (isdigit(p[0])) {
             const start = p;
             const val = try utils.strtol(p, &p);
@@ -155,8 +151,7 @@ pub fn tokenize(self: *Self) anyerror!*Token {
             }
             const end = @ptrToInt(pp) - @ptrToInt(p);
             const loc = p[0..end];
-            var kind = TokenKind.Ident;
-            cur.next = self.new_token(.{ .kind = kind, .loc = loc });
+            cur.next = self.new_token(.{ .kind = .Ident, .loc = loc });
             cur = cur.next;
             convert_keyword(cur);
             p = pp;
