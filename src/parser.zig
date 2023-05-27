@@ -27,6 +27,7 @@ pub const NodeKind = enum(u8) {
     Var,
     Addr, // &
     Deref, // *
+    Funcall,
 };
 
 pub const Obj = struct {
@@ -60,6 +61,7 @@ pub const Function = struct {
 const TABS = "                                    ";
 pub const Node = struct {
     kind: NodeKind,
+    tok: ?*Token = null,
     next: ?*Node = null,
     lhs: ?*Node = null,
     rhs: ?*Node = null,
@@ -76,6 +78,7 @@ pub const Node = struct {
     var_: ?*Obj = null,
     val: i32 = 0,
     ty: *Type = &Type.TYPE_NONE,
+    funcname: ?[]const u8 = null,
 
     fn is_ty_integer(self: *Node) bool {
         return self.ty.kind != .None and self.ty.kind == .Int;
@@ -183,6 +186,8 @@ fn create_func(self: *Self, body: *Node) anyerror!*Function {
 
 fn new_node(self: *Self, attr: Node) *Node {
     const node = self.allocator.create(Node) catch unreachable;
+    node.ty = &Type.TYPE_NONE;
+    node.tok = self.cur_token;
     node.* = attr;
     std.log.debug("new node,ty: {}", .{node.ty});
     return node;
@@ -438,7 +443,7 @@ fn unary(self: *Self) anyerror!*Node {
     return self.primary();
 }
 
-// primary = "(" expr ")" | ident | num
+// primary = "(" expr ")" | ident args? | num
 fn primary(self: *Self) anyerror!*Node {
     if (self.cur_token.eql("(")) {
         self.advance();
@@ -452,8 +457,15 @@ fn primary(self: *Self) anyerror!*Node {
         return node;
     }
     if (self.cur_token.kind == .Ident) {
-        const obj = self.find_var(self.cur_token) orelse self.new_lvar(.{ .name = self.cur_token.loc });
-        const node = self.new_node(.{ .kind = .Var, .var_ = obj });
+        if (token_match(self.cur_token.next, "(")) {
+            const node = self.new_node(.{ .kind = .Funcall, .funcname = self.cur_token.loc });
+            self.advance();
+            self.advance();
+            try self.cur_token_skip(")");
+            return node;
+        }
+        const node = self.new_node(.{ .kind = .Var });
+        node.var_ = self.find_var(self.cur_token) orelse self.new_lvar(.{ .name = self.cur_token.loc });
         self.advance();
         return node;
     }
@@ -464,6 +476,13 @@ fn cur_token_match(self: *Self, tok: []const u8) bool {
     if (self.cur_token.eql(tok)) {
         self.advance();
         return true;
+    }
+    return false;
+}
+
+fn token_match(tok: ?*Token, name: []const u8) bool {
+    if (tok) |t| {
+        return std.mem.eql(u8, t.loc, name);
     }
     return false;
 }

@@ -121,29 +121,25 @@ fn inc_count(self: *Self) u8 {
 // eval the expr to the %rax
 pub fn gen_expr(self: *Self, node: *Node) anyerror!void {
     std.log.debug("gen_expr for node: {}", .{node.kind});
+    var gen_unary = true;
     switch (node.kind) {
         .Num => {
             println("  mov ${d}, %rax", .{node.val});
-            return;
         },
         .Neg => {
             try self.gen_expr(node.lhs.?);
             println(" neg %rax", .{});
-            return;
         },
         .Addr => {
             try self.gen_addr(node.lhs.?);
-            return;
         },
         .Deref => {
             try self.gen_expr(node.lhs.?);
             println(" mov (%rax), %rax", .{});
-            return;
         },
         .Var => {
             try self.gen_addr(node);
             println("  mov (%rax), %rax", .{});
-            return;
         },
         .Assign => {
             try self.gen_addr(node.lhs.?);
@@ -152,10 +148,16 @@ pub fn gen_expr(self: *Self, node: *Node) anyerror!void {
             try self.gen_expr(node.rhs.?);
             self.pop("%rdi");
             println("  mov %rax, (%rdi)", .{});
-            return;
         },
-        else => {},
+        .Funcall => {
+            println("  mov $0, %rax", .{});
+            println("  call {s}", .{node.funcname.?});
+        },
+        else => {
+            gen_unary = false;
+        },
     }
+    if (gen_unary) return;
     try self.gen_expr(node.rhs.?);
     self.push();
 

@@ -1,11 +1,19 @@
 #!/bin/bash
+
+cd zig-out
+
+cat <<EOF | gcc -xc -c -o tmp2.o -
+int ret3() { return 3; }
+int ret5() { return 5; }
+EOF
+
 assert() {
   expected="$1"
   input="$2"
 
-  ./zig-out/bin/chibicc "$input" > ./zig-out/tmp.s || exit
-  gcc -static -o ./zig-out/tmp ./zig-out/tmp.s
-  ./zig-out/tmp
+  ./bin/chibicc "$input" > tmp.s || exit
+  gcc -static -o tmp tmp.s tmp2.o 
+  ./tmp
   actual="$?"
 
   if [ "$actual" = "$expected" ]; then
@@ -91,5 +99,8 @@ assert 7 '{ int x=3; int y=5; *(&y-2+1)=7; return x; }'
 assert 5 '{ int x=3; return (&x+2)-&x+3; }'
 assert 8 '{ int x, y; x=3; y=5; return x+y; }'
 assert 8 '{ int x=3, y=5; return x+y; }'
+
+assert 3 '{ return ret3(); }'
+assert 5 '{ return ret5(); }'
 
 echo OK
