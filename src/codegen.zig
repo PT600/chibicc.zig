@@ -8,6 +8,7 @@ const println = utils.println;
 const GenError = error{ InvalidExpression, InvalidStmt, NotAnLvalue };
 
 const Self = @This();
+const arg_regs = [_][]const u8{ "%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9" };
 
 depth: u32,
 count: u8,
@@ -121,43 +122,7 @@ fn inc_count(self: *Self) u8 {
 // eval the expr to the %rax
 pub fn gen_expr(self: *Self, node: *Node) anyerror!void {
     std.log.debug("gen_expr for node: {}", .{node.kind});
-    var gen_unary = true;
-    switch (node.kind) {
-        .Num => {
-            println("  mov ${d}, %rax", .{node.val});
-        },
-        .Neg => {
-            try self.gen_expr(node.lhs.?);
-            println(" neg %rax", .{});
-        },
-        .Addr => {
-            try self.gen_addr(node.lhs.?);
-        },
-        .Deref => {
-            try self.gen_expr(node.lhs.?);
-            println(" mov (%rax), %rax", .{});
-        },
-        .Var => {
-            try self.gen_addr(node);
-            println("  mov (%rax), %rax", .{});
-        },
-        .Assign => {
-            try self.gen_addr(node.lhs.?);
-            self.push();
-
-            try self.gen_expr(node.rhs.?);
-            self.pop("%rdi");
-            println("  mov %rax, (%rdi)", .{});
-        },
-        .Funcall => {
-            println("  mov $0, %rax", .{});
-            println("  call {s}", .{node.funcname.?});
-        },
-        else => {
-            gen_unary = false;
-        },
-    }
-    if (gen_unary) return;
+    if (try self.gen_unary(node)) return;
     try self.gen_expr(node.rhs.?);
     self.push();
 
@@ -194,6 +159,57 @@ pub fn gen_expr(self: *Self, node: *Node) anyerror!void {
             return error.InvalidExpression;
         },
     }
+}
+
+fn gen_unary(self: *Self, node: *Node) anyerror!bool {
+    switch (node.kind) {
+        .Num => {
+            println("  mov ${d}, %rax", .{node.val});
+        },
+        .Neg => {
+            try self.gen_expr(node.lhs.?);
+            println(" neg %rax", .{});
+        },
+        .Addr => {
+            try self.gen_addr(node.lhs.?);
+        },
+        .Deref => {
+            try self.gen_expr(node.lhs.?);
+            println(" mov (%rax), %rax", .{});
+        },
+        .Var => {
+            try self.gen_addr(node);
+            println("  mov (%rax), %rax", .{});
+        },
+        .Assign => {
+            try self.gen_addr(node.lhs.?);
+            self.push();
+            try self.gen_expr(node.rhs.?);
+            self.pop("%rdi");
+            println("  mov %rax, (%rdi)", .{});
+        },
+        .Funcall => {
+            var args = node.args;
+            var nargs: usize = 0;
+            while (args) |arg| {
+                try self.gen_expr(arg);
+                self.push();
+                //println("  mov %rax, {s}", .{arg_regs[nargs]});
+                nargs += 1;
+                args = arg.next;
+            }
+            while (nargs > 0) {
+                self.pop(arg_regs[nargs - 1]);
+                nargs -= 1;
+            }
+            println("  mov $0, %rax", .{});
+            println("  call {s}", .{node.funcname.?});
+        },
+        else => {
+            return false;
+        },
+    }
+    return true;
 }
 
 fn gen_addr(self: *Self, node: *Node) anyerror!void {

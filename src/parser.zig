@@ -61,8 +61,8 @@ pub const Function = struct {
 const TABS = "                                    ";
 pub const Node = struct {
     kind: NodeKind,
-    tok: ?*Token = null,
     next: ?*Node = null,
+    tok: ?*Token = null,
     lhs: ?*Node = null,
     rhs: ?*Node = null,
     // block
@@ -79,6 +79,7 @@ pub const Node = struct {
     val: i32 = 0,
     ty: *Type = &Type.TYPE_NONE,
     funcname: ?[]const u8 = null,
+    args: ?*Node = null,
 
     fn is_ty_integer(self: *Node) bool {
         return self.ty.kind != .None and self.ty.kind == .Int;
@@ -186,9 +187,9 @@ fn create_func(self: *Self, body: *Node) anyerror!*Function {
 
 fn new_node(self: *Self, attr: Node) *Node {
     const node = self.allocator.create(Node) catch unreachable;
-    node.ty = &Type.TYPE_NONE;
-    node.tok = self.cur_token;
     node.* = attr;
+    if (attr.tok == null)
+        node.tok = self.cur_token;
     std.log.debug("new node,ty: {}", .{node.ty});
     return node;
 }
@@ -257,11 +258,10 @@ fn block_stmt(self: *Self) anyerror!*Node {
     var head = Node{ .kind = .Stmt };
     var cur = &head;
     while (!self.cur_token.eql("}")) {
-        var node = if (self.cur_token.eql("int"))
+        const node = if (self.cur_token.eql("int"))
             try self.declaration()
         else
             try self.stmt();
-
         cur.next = node;
         cur = node;
         self.add_type(cur);
@@ -457,19 +457,29 @@ fn primary(self: *Self) anyerror!*Node {
         return node;
     }
     if (self.cur_token.kind == .Ident) {
-        if (token_match(self.cur_token.next, "(")) {
-            const node = self.new_node(.{ .kind = .Funcall, .funcname = self.cur_token.loc });
-            self.advance();
-            self.advance();
-            try self.cur_token_skip(")");
-            return node;
-        }
+        if (token_match(self.cur_token.next, "(")) return self.funcall();
         const node = self.new_node(.{ .kind = .Var });
         node.var_ = self.find_var(self.cur_token) orelse self.new_lvar(.{ .name = self.cur_token.loc });
         self.advance();
         return node;
     }
     return self.cur_token.error_tok("expected an expression\n", .{});
+}
+
+fn funcall(self: *Self) anyerror!*Node {
+    const node = self.new_node(.{ .kind = .Funcall, .funcname = self.cur_token.loc });
+    self.advance();
+    self.advance();
+    var head = Node{ .kind = .Stmt };
+    var cur = &head;
+    while (!self.cur_token_match(")")) {
+        const arg = try self.expr();
+        cur.next = arg;
+        cur = arg;
+        _ = self.cur_token_match(",");
+    }
+    node.args = head.next;
+    return node;
 }
 
 fn cur_token_match(self: *Self, tok: []const u8) bool {
