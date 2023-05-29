@@ -5,6 +5,7 @@ const Token = @import("tokenizer.zig").Token;
 pub const TypeKind = enum(u8) {
     Int,
     Ptr,
+    Func,
     None,
 };
 const Self = @This();
@@ -14,6 +15,7 @@ pub var TYPE_NONE = Self{ .kind = .None };
 
 kind: TypeKind,
 base: ?*Self = null,
+return_ty: ?*Self = null,
 name: *const Token = &Token.eof_token,
 
 pub fn is_integer(self: *Self) bool {

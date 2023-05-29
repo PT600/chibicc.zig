@@ -12,6 +12,7 @@ const arg_regs = [_][]const u8{ "%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9" };
 
 depth: u32,
 count: u8,
+cur_func: ?*Function = null,
 
 pub fn init() Self {
     return Self{ .depth = 0, .count = 0 };
@@ -28,17 +29,25 @@ pub fn pop(self: *Self, arg: []const u8) void {
 }
 
 pub fn gen(self: *Self, prog: *Function) anyerror!void {
-    println("  .globl main", .{});
-    println("main:", .{});
+    var cur: ?*Function = prog;
+    while (cur) |func| {
+        try self.gen_func(func);
+        cur = func.next;
+    }
+}
 
+fn gen_func(self: *Self, func: *Function) anyerror!void {
+    self.cur_func = func;
+    println("  .globl {s}", .{func.name});
+    println("{s}:", .{func.name});
     //Prologue
     println("  push %rbp", .{});
     println("  mov %rsp, %rbp", .{});
-    println("  sub ${d}, %rsp", .{prog.stack_size});
+    println("  sub ${d}, %rsp", .{func.stack_size});
 
-    try self.gen_stmt(prog.body);
+    try self.gen_stmt(func.body);
     try utils.assert(self.depth == 0);
-    println(".L.return:", .{});
+    println(".L.return.{s}:", .{func.name});
     println("  mov %rbp, %rsp", .{});
     println("  pop %rbp", .{});
     println("  ret", .{});
@@ -50,7 +59,7 @@ pub fn gen_stmt(self: *Self, node: *Node) anyerror!void {
         .Return => {
             const expr_node = node.lhs.?;
             try self.gen_expr(expr_node);
-            println("  jmp .L.return", .{});
+            println("  jmp .L.return.{s}", .{self.cur_func.?.name});
         },
         .Stmt => {
             const expr_node = node.lhs.?;

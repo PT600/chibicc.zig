@@ -38,7 +38,10 @@ pub const Obj = struct {
 };
 
 pub const Function = struct {
-    body: *Node,
+    name: []const u8,
+    body: *Node = undefined,
+    ty: *Type = undefined,
+    next: ?*Function = null,
     locals: ?*Obj = null,
     stack_size: usize = 0,
 
@@ -55,6 +58,16 @@ pub const Function = struct {
 
     fn align_to(n: usize, align_: usize) usize {
         return (n + align_ - 1) / align_ * align_;
+    }
+
+    fn debug(self: *Function) void {
+        var cur: ?*Function = self;
+        while (cur) |fun| {
+            std.log.debug("*" ** 40, .{});
+            std.log.debug("fun, name: {s}", .{fun.name});
+            fun.body.debug(0);
+            cur = fun.next;
+        }
     }
 };
 
@@ -130,16 +143,18 @@ pub fn init(allocator: std.mem.Allocator, tokenizer: *Tokenizer, cur_token: *Tok
 }
 
 pub fn parse(self: *Self) anyerror!*Function {
-    var head = Node{ .kind = .Stmt };
+    var head = Function{ .name = "" };
     var cur = &head;
     while (self.cur_token.kind != .Eof) {
-        const node = try self.stmt();
-        cur.next = node;
-        cur = node;
+        const fun = try self.function();
+        cur.next = fun;
+        cur = fun;
+        std.log.debug("cur: *************: {}", .{cur.next == null});
     }
-    const node = head.next.?;
-    node.debug(0);
-    return self.create_func(node);
+    const fun = head.next.?;
+    std.log.debug("xxxxxxxxxx: {}", .{fun.next == null});
+    fun.debug();
+    return fun;
 }
 
 fn new_add(self: *Self, lhs: *Node, rhs: *Node) !*Node {
@@ -177,12 +192,11 @@ fn new_sub(self: *Self, lhs: *Node, rhs: *Node) !*Node {
     return error.TokenError;
 }
 
-fn create_func(self: *Self, body: *Node) anyerror!*Function {
-    const func = try self.allocator.create(Function);
-    func.body = body;
-    func.locals = self.locals;
-    func.assign_lvar_offsets();
-    return func;
+fn new_func(self: *Self, body: *Node, name: []const u8, ty: *Type) *Function {
+    const fun = self.allocator.create(Function) catch unreachable;
+    fun.* = .{ .name = name, .body = body, .ty = ty, .locals = self.locals };
+    fun.assign_lvar_offsets();
+    return fun;
 }
 
 fn new_node(self: *Self, attr: Node) *Node {
@@ -200,6 +214,16 @@ fn new_lvar(self: *Self, attr: Obj) *Obj {
     obj.next = self.locals;
     self.locals = obj;
     return obj;
+}
+
+fn function(self: *Self) anyerror!*Function {
+    var ty = try self.declspec();
+    ty = try self.declarator(ty);
+    self.locals = null;
+
+    try self.cur_token_skip("{");
+    const body = try self.block_stmt();
+    return self.new_func(body, ty.name.loc, ty);
 }
 
 // stmt = "return" expr ";"
@@ -297,7 +321,7 @@ fn declspec(self: *Self) !*Type {
     return &Type.TYPE_INT;
 }
 
-// declarator = "*" * Ident
+// declarator = "*" * Ident type-suffix
 fn declarator(self: *Self, base: *Type) !*Type {
     _ = self.cur_token_match(",");
     var ty = base;
@@ -306,8 +330,19 @@ fn declarator(self: *Self, base: *Type) !*Type {
     }
     if (self.cur_token.kind != .Ident)
         return self.cur_token.error_tok("expect a variable name", .{});
-    ty.name = self.cur_token;
+    const tok = self.cur_token;
     self.advance();
+    ty = try self.type_suffix(ty);
+    ty.name = tok;
+    return ty;
+}
+
+// type-suffix = ("(" func-params ")")?
+fn type_suffix(self: *Self, ty: *Type) !*Type {
+    if (self.cur_token_match("(")) {
+        try self.cur_token_skip(")");
+        return self.new_type(.{ .kind = .Func, .return_ty = ty });
+    }
     return ty;
 }
 
