@@ -45,6 +45,11 @@ fn gen_func(self: *Self, func: *Function) anyerror!void {
     println("  mov %rsp, %rbp", .{});
     println("  sub ${d}, %rsp", .{func.stack_size});
 
+    for (func.params, 0..) |p, i| {
+        std.log.debug("func.params: {s}", .{p.name});
+        println("  mov {s}, -{d}(%rbp)", .{ arg_regs[i], p.offset });
+    }
+
     try self.gen_stmt(func.body);
     try utils.assert(self.depth == 0);
     println(".L.return.{s}:", .{func.name});

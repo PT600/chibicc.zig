@@ -16,12 +16,13 @@ pub var TYPE_NONE = Self{ .kind = .None };
 kind: TypeKind,
 base: ?*Self = null,
 return_ty: ?*Self = null,
-name: *const Token = &Token.eof_token,
+params: ?*Self = null,
+next: ?*Self = null,
 
 pub fn is_integer(self: *Self) bool {
     return self.kind == .Int;
 }
 
 pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
-    return writer.print("{?}, {?}, {?}", .{ self.kind, self.name.kind, self.base });
+    return writer.print("{?}, {?}", .{ self.kind, self.base });
 }

@@ -33,27 +33,25 @@ pub const NodeKind = enum(u8) {
 pub const Obj = struct {
     name: []const u8,
     offset: usize = 0,
-    next: ?*Obj = null,
     ty: *Type = &Type.TYPE_NONE,
 };
 
 pub const Function = struct {
     name: []const u8,
     body: *Node = undefined,
-    ty: *Type = undefined,
+    return_ty: *Type = &Type.TYPE_NONE,
+    locals: []*Obj = undefined,
+    params: []*Obj = undefined,
     next: ?*Function = null,
-    locals: ?*Obj = null,
     stack_size: usize = 0,
 
     fn assign_lvar_offsets(self: *Function) void {
-        var offset: usize = 0;
-        var locals = self.locals;
-        while (locals) |l| {
-            offset += 8;
+        var offset = self.locals.len * 8;
+        for (self.locals) |l| {
             l.offset = offset;
-            locals = l.next;
+            offset -= 8;
         }
-        self.stack_size = align_to(offset, 16);
+        self.stack_size = align_to(self.locals.len * 8, 16);
     }
 
     fn align_to(n: usize, align_: usize) usize {
@@ -64,7 +62,7 @@ pub const Function = struct {
         var cur: ?*Function = self;
         while (cur) |fun| {
             std.log.debug("*" ** 40, .{});
-            std.log.debug("fun, name: {s}", .{fun.name});
+            std.log.debug("fun, name: {s}, {any}", .{ fun.name, fun.params });
             fun.body.debug(0);
             cur = fun.next;
         }
@@ -129,15 +127,15 @@ const Self = @This();
 allocator: std.mem.Allocator,
 tokenizer: *Tokenizer,
 cur_token: *Token,
-locals: ?*Obj = null,
+locals: std.ArrayList(*Obj),
 scaler: *Node = undefined,
 
-pub fn init(allocator: std.mem.Allocator, tokenizer: *Tokenizer, cur_token: *Token) Self {
-    var self = Self{
-        .allocator = allocator,
-        .tokenizer = tokenizer,
-        .cur_token = cur_token,
-    };
+pub fn init(allocator: std.mem.Allocator, tokenizer: *Tokenizer, cur_token: *Token) *Self {
+    const self = allocator.create(Self) catch unreachable;
+    self.allocator = allocator;
+    self.tokenizer = tokenizer;
+    self.cur_token = cur_token;
+    self.locals = std.ArrayList(*Obj).init(allocator);
     self.scaler = self.new_node(.{ .kind = .Num, .val = 8 });
     return self;
 }
@@ -149,10 +147,8 @@ pub fn parse(self: *Self) anyerror!*Function {
         const fun = try self.function();
         cur.next = fun;
         cur = fun;
-        std.log.debug("cur: *************: {}", .{cur.next == null});
     }
     const fun = head.next.?;
-    std.log.debug("xxxxxxxxxx: {}", .{fun.next == null});
     fun.debug();
     return fun;
 }
@@ -171,6 +167,7 @@ fn new_add(self: *Self, lhs: *Node, rhs: *Node) !*Node {
         const new_rhs = self.new_node(.{ .kind = .Mul, .lhs = self.scaler, .rhs = rhs });
         return self.new_node(.{ .kind = .Add, .lhs = lhs, .rhs = new_rhs });
     }
+    std.log.debug("lhs: {} {}, rhs: {} {}", .{ lhs.kind, lhs.ty, rhs.kind, rhs.ty });
     return error.TokenError;
 }
 
@@ -192,9 +189,9 @@ fn new_sub(self: *Self, lhs: *Node, rhs: *Node) !*Node {
     return error.TokenError;
 }
 
-fn new_func(self: *Self, body: *Node, name: []const u8, ty: *Type) *Function {
+fn new_func(self: *Self, attr: Function) *Function {
     const fun = self.allocator.create(Function) catch unreachable;
-    fun.* = .{ .name = name, .body = body, .ty = ty, .locals = self.locals };
+    fun.* = attr;
     fun.assign_lvar_offsets();
     return fun;
 }
@@ -204,26 +201,29 @@ fn new_node(self: *Self, attr: Node) *Node {
     node.* = attr;
     if (attr.tok == null)
         node.tok = self.cur_token;
-    std.log.debug("new node,ty: {}", .{node.ty});
     return node;
 }
 
-fn new_lvar(self: *Self, attr: Obj) *Obj {
+fn new_lvar(self: *Self, ty: *Type, name: []const u8) *Obj {
     const obj = self.allocator.create(Obj) catch unreachable;
-    obj.* = attr;
-    obj.next = self.locals;
-    self.locals = obj;
+    obj.ty = ty;
+    obj.name = name;
+    obj.offset = 0;
+    self.locals.append(obj) catch unreachable;
     return obj;
 }
 
+// function = declspec declarator "(" (declspec declarator ",")* ")";
 fn function(self: *Self) anyerror!*Function {
-    var ty = try self.declspec();
-    ty = try self.declarator(ty);
-    self.locals = null;
-
+    var return_ty = try self.declspec();
+    return_ty = try self.declarator(return_ty);
+    const name = try self.consume_ident();
+    const params = try self.func_params();
     try self.cur_token_skip("{");
     const body = try self.block_stmt();
-    return self.new_func(body, ty.name.loc, ty);
+    const locals = self.locals.items[0..self.locals.items.len];
+    self.locals = std.ArrayList(*Obj).init(self.allocator);
+    return self.new_func(.{ .body = body, .name = name, .return_ty = return_ty, .params = params, .locals = locals });
 }
 
 // stmt = "return" expr ";"
@@ -302,7 +302,8 @@ fn declaration(self: *Self) anyerror!*Node {
     var cur = &head;
     while (!self.cur_token_match(";")) {
         const ty = try self.declarator(basety);
-        var var_ = self.new_lvar(.{ .ty = ty, .name = ty.name.loc });
+        const name = try self.consume_ident();
+        var var_ = self.new_lvar(ty, name);
         if (self.cur_token_match("=")) {
             const rhs = try self.assign();
             const lhs = self.new_node(.{ .kind = .Var, .var_ = var_ });
@@ -321,29 +322,35 @@ fn declspec(self: *Self) !*Type {
     return &Type.TYPE_INT;
 }
 
-// declarator = "*" * Ident type-suffix
+// declarator = "*" * Ident
 fn declarator(self: *Self, base: *Type) !*Type {
     _ = self.cur_token_match(",");
     var ty = base;
     while (self.cur_token_match("*")) {
         ty = self.pointer_to(ty);
     }
+    return ty;
+}
+
+fn consume_ident(self: *Self) ![]const u8 {
     if (self.cur_token.kind != .Ident)
         return self.cur_token.error_tok("expect a variable name", .{});
     const tok = self.cur_token;
     self.advance();
-    ty = try self.type_suffix(ty);
-    ty.name = tok;
-    return ty;
+    return tok.loc;
 }
 
-// type-suffix = ("(" func-params ")")?
-fn type_suffix(self: *Self, ty: *Type) !*Type {
-    if (self.cur_token_match("(")) {
-        try self.cur_token_skip(")");
-        return self.new_type(.{ .kind = .Func, .return_ty = ty });
+// fucn-params = ("(" params ")")?
+fn func_params(self: *Self) ![]*Obj {
+    try self.cur_token_skip("(");
+    while (!self.cur_token_match(")")) {
+        var basety = try self.declspec();
+        const ty = try self.declarator(basety);
+        const name = try self.consume_ident();
+        _ = self.new_lvar(ty, name);
+        _ = self.cur_token_match(",");
     }
-    return ty;
+    return self.locals.items[0..self.locals.items.len];
 }
 
 // expr-stmt = expr? ";"
@@ -494,7 +501,7 @@ fn primary(self: *Self) anyerror!*Node {
     if (self.cur_token.kind == .Ident) {
         if (token_match(self.cur_token.next, "(")) return self.funcall();
         const node = self.new_node(.{ .kind = .Var });
-        node.var_ = self.find_var(self.cur_token) orelse self.new_lvar(.{ .name = self.cur_token.loc });
+        node.var_ = self.find_var(self.cur_token) orelse return error.ParseError;
         self.advance();
         return node;
     }
@@ -545,11 +552,9 @@ fn peek(self: *Self) *Node {
 }
 
 fn find_var(self: *Self, tok: *Token) ?*Obj {
-    var locals = self.locals;
-    while (locals) |l| {
+    for (self.locals.items) |l| {
         if (tok.eql(l.name))
             return l;
-        locals = l.next;
     }
     return null;
 }
@@ -574,9 +579,13 @@ fn add_type0(self: *Self, node: *Node) void {
 
     var body = node.body;
     while (body) |b| {
-        if (b.kind == .Eof) break;
         self.add_type(b);
         body = b.next;
+    }
+    var args = node.args;
+    while (args) |arg| {
+        self.add_type(arg);
+        args = arg.next;
     }
     switch (node.kind) {
         .Add, .Sub, .Mul, .Div, .Neg, .Assign => {
@@ -585,7 +594,7 @@ fn add_type0(self: *Self, node: *Node) void {
         .Addr => {
             node.ty = self.pointer_to(node.lhs.?.ty);
         },
-        .Equal, .NotEqual, .LessThan, .LessEqual, .Var, .Num => {
+        .Equal, .NotEqual, .LessThan, .LessEqual, .Var, .Num, .Funcall => {
             node.ty = &Type.TYPE_INT;
         },
         .Deref => {
@@ -607,7 +616,6 @@ fn pointer_to(self: *Self, base: *Type) *Type {
 
 fn new_type(self: *Self, attr: Type) *Type {
     var ty = self.allocator.create(Type) catch unreachable;
-    ty.name = &Token.eof_token;
     ty.* = attr;
     return ty;
 }
