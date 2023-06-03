@@ -155,8 +155,8 @@ pub fn parse(self: *Self) anyerror!*Function {
 }
 
 fn new_add(self: *Self, lhs: *Node, rhs: *Node) !*Node {
-    self.add_type(lhs, 0);
-    self.add_type(rhs, 0);
+    //self.add_type(lhs, 0);
+    //self.add_type(rhs, 0);
     if (lhs.is_ty_integer() and rhs.is_ty_integer()) {
         return self.new_node(.{ .kind = .Add, .lhs = lhs, .rhs = rhs });
     }
@@ -181,8 +181,8 @@ fn new_add(self: *Self, lhs: *Node, rhs: *Node) !*Node {
 }
 
 fn new_sub(self: *Self, lhs: *Node, rhs: *Node) !*Node {
-    self.add_type(lhs, 0);
-    self.add_type(rhs, 0);
+    //self.add_type(lhs, 0);
+    //self.add_type(rhs, 0);
     if (lhs.is_ty_integer() and rhs.is_ty_integer()) {
         return self.new_node(.{ .kind = .Sub, .lhs = lhs, .rhs = rhs });
     }
@@ -190,8 +190,8 @@ fn new_sub(self: *Self, lhs: *Node, rhs: *Node) !*Node {
     if (lhs.ty.base != null and rhs.is_ty_integer()) {
         const num = self.new_num(lhs.ty.base.?.size);
         const new_rhs = self.new_node(.{ .kind = .Mul, .lhs = num, .rhs = rhs });
-        self.add_type(new_rhs, 0);
-        return self.new_node(.{ .kind = .Sub, .lhs = lhs, .rhs = new_rhs, .ty = lhs.ty });
+        //self.add_type(new_rhs, 0);
+        return self.new_node(.{ .kind = .Sub, .lhs = lhs, .rhs = new_rhs });
     }
 
     // ptr - ptr
@@ -211,7 +211,7 @@ fn new_func(self: *Self, attr: Function) *Function {
 }
 
 fn new_num(self: *Self, val: anytype) *Node {
-    return self.new_node(.{ .kind = .Num, .val = @intCast(i32, val) });
+    return self.new_node(.{ .kind = .Num, .val = @intCast(i32, val), .ty = &Type.TYPE_INT });
 }
 
 fn new_binary(self: *Self, kind: NodeKind, lhs: *Node, rhs: *Node) *Node {
@@ -223,7 +223,35 @@ fn new_node(self: *Self, attr: Node) *Node {
     node.* = attr;
     if (attr.tok == null)
         node.tok = self.cur_token;
+    self.parse_type(node);
     return node;
+}
+
+fn parse_type(self: *Self, node: *Node) void {
+    if (node.ty.kind != .None) return;
+    switch (node.kind) {
+        .Add, .Sub, .Mul, .Div, .Neg, .Assign => {
+            node.ty = node.lhs.?.ty;
+        },
+        .Addr => {
+            const lhs = node.lhs.?;
+            if (lhs.ty.kind == .Array) {
+                node.ty = self.pointer_to(lhs.ty.base.?);
+            } else {
+                node.ty = self.pointer_to(lhs.ty);
+            }
+        },
+        .Equal, .NotEqual, .LessThan, .LessEqual, .Num, .Funcall => {
+            node.ty = &Type.TYPE_INT;
+        },
+        .Var => {
+            node.ty = node.var_.?.ty;
+        },
+        .Deref => {
+            node.ty = node.lhs.?.ty.base.?;
+        },
+        else => return,
+    }
 }
 
 fn new_lvar(self: *Self, ty: *Type, name: []const u8) *Obj {
@@ -309,7 +337,7 @@ fn block_stmt(self: *Self) anyerror!*Node {
             try self.stmt();
         cur.next = node;
         cur = node;
-        self.add_type(cur, 0);
+        //self.add_type(cur, 0);
     }
     try self.cur_token_skip("}");
     return self.new_node(.{ .kind = .Block, .body = head.next });
@@ -386,10 +414,10 @@ fn array_suffix(self: *Self, basety: *Type) !*Type {
     var ty = basety;
     if (self.cur_token_match("[")) {
         const len = @intCast(usize, try self.cur_token.get_number());
-        const size = ty.size * len;
         self.advance();
-        ty = self.new_type(.{ .kind = .Array, .base = ty, .array_len = len, .size = size });
         try self.cur_token_skip("]");
+        ty = try self.array_suffix(ty);
+        ty = self.new_array_type(ty, len);
     }
     return ty;
 }
@@ -541,8 +569,8 @@ fn primary(self: *Self) anyerror!*Node {
     }
     if (self.cur_token.kind == .Ident) {
         if (token_match(self.cur_token.next, "(")) return self.funcall();
-        const node = self.new_node(.{ .kind = .Var });
-        node.var_ = self.find_var(self.cur_token) orelse return error.ParseError;
+        const var_ = self.find_var(self.cur_token) orelse return error.ParseError;
+        const node = self.new_node(.{ .kind = .Var, .var_ = var_ });
         self.advance();
         return node;
     }
@@ -668,4 +696,9 @@ fn new_type(self: *Self, attr: Type) *Type {
     var ty = self.allocator.create(Type) catch unreachable;
     ty.* = attr;
     return ty;
+}
+
+fn new_array_type(self: *Self, basety: *Type, len: usize) *Type {
+    const size = basety.size * len;
+    return self.new_type(.{ .kind = .Array, .base = basety, .array_len = len, .size = size });
 }
