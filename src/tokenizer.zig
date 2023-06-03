@@ -22,16 +22,16 @@ pub const Token = struct {
         return std.mem.eql(u8, self.loc, s);
     }
 
-    pub fn skip(self: *Token, s: []const u8) !*Token {
+    pub fn skip(self: *Token, s: []const u8) anyerror!*Token {
         if (!self.eql(s)) {
             return self.error_tok("expected '{s}'\n", .{s});
         }
         return self.next;
     }
 
-    pub fn get_number(self: *Token) !i32 {
+    pub fn get_number(self: *Token) anyerror!i32 {
         if (self.kind != .Num) {
-            try self.error_tok("expected a number!\n", .{});
+            return self.error_tok("expected a number!\n", .{});
         }
         return self.val;
     }
@@ -95,7 +95,7 @@ pub fn debug_token(self: *Self, token: *Token) !void {
     _ = self;
     var cur = token;
     while (cur.kind != .Eof) {
-        std.log.debug("{}: {s}", .{ cur.kind, cur.loc });
+        //std.log.debug("{}: {s}", .{ cur.kind, cur.loc });
         cur = cur.next;
     }
 }

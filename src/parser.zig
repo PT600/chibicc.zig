@@ -32,26 +32,29 @@ pub const NodeKind = enum(u8) {
 
 pub const Obj = struct {
     name: []const u8,
-    offset: usize = 0,
+    offset: i16 = 0,
     ty: *Type = &Type.TYPE_NONE,
+    next: ?*Obj = null,
 };
 
 pub const Function = struct {
     name: []const u8,
     body: *Node = undefined,
     return_ty: *Type = &Type.TYPE_NONE,
-    locals: []*Obj = undefined,
-    params: []*Obj = undefined,
+    locals: ?*Obj = null,
+    params: ?*Obj = null,
     next: ?*Function = null,
     stack_size: usize = 0,
 
     fn assign_lvar_offsets(self: *Function) void {
-        var offset = self.locals.len * 8;
-        for (self.locals) |l| {
-            l.offset = offset;
-            offset -= 8;
+        var offset: usize = 0;
+        var locals = self.locals;
+        while (locals) |l| {
+            offset += l.ty.size;
+            l.offset = -@intCast(i16, offset);
+            locals = l.next;
         }
-        self.stack_size = align_to(self.locals.len * 8, 16);
+        self.stack_size = align_to(offset, 16);
     }
 
     fn align_to(n: usize, align_: usize) usize {
@@ -127,16 +130,14 @@ const Self = @This();
 allocator: std.mem.Allocator,
 tokenizer: *Tokenizer,
 cur_token: *Token,
-locals: std.ArrayList(*Obj),
-scaler: *Node = undefined,
+locals: ?*Obj,
 
 pub fn init(allocator: std.mem.Allocator, tokenizer: *Tokenizer, cur_token: *Token) *Self {
     const self = allocator.create(Self) catch unreachable;
     self.allocator = allocator;
     self.tokenizer = tokenizer;
     self.cur_token = cur_token;
-    self.locals = std.ArrayList(*Obj).init(allocator);
-    self.scaler = self.new_node(.{ .kind = .Num, .val = 8 });
+    self.locals = null;
     return self;
 }
 
@@ -154,17 +155,21 @@ pub fn parse(self: *Self) anyerror!*Function {
 }
 
 fn new_add(self: *Self, lhs: *Node, rhs: *Node) !*Node {
-    self.add_type(lhs);
-    self.add_type(rhs);
+    self.add_type(lhs, 0);
+    self.add_type(rhs, 0);
     if (lhs.is_ty_integer() and rhs.is_ty_integer()) {
         return self.new_node(.{ .kind = .Add, .lhs = lhs, .rhs = rhs });
     }
+    // num + ptr
     if (lhs.is_ty_integer() and rhs.is_ty_pointer()) {
-        const new_rhs = self.new_node(.{ .kind = .Mul, .lhs = self.scaler, .rhs = lhs });
+        const num = self.new_num(rhs.ty.base.?.size);
+        const new_rhs = self.new_node(.{ .kind = .Mul, .lhs = num, .rhs = lhs });
         return self.new_node(.{ .kind = .Add, .lhs = rhs, .rhs = new_rhs });
     }
+    // ptr + num
     if (lhs.is_ty_pointer() and rhs.is_ty_integer()) {
-        const new_rhs = self.new_node(.{ .kind = .Mul, .lhs = self.scaler, .rhs = rhs });
+        const num = self.new_num(lhs.ty.base.?.size);
+        const new_rhs = self.new_node(.{ .kind = .Mul, .lhs = num, .rhs = rhs });
         return self.new_node(.{ .kind = .Add, .lhs = lhs, .rhs = new_rhs });
     }
     std.log.debug("lhs: {} {}, rhs: {} {}", .{ lhs.kind, lhs.ty, rhs.kind, rhs.ty });
@@ -172,19 +177,21 @@ fn new_add(self: *Self, lhs: *Node, rhs: *Node) !*Node {
 }
 
 fn new_sub(self: *Self, lhs: *Node, rhs: *Node) !*Node {
-    self.add_type(lhs);
-    self.add_type(rhs);
+    self.add_type(lhs, 0);
+    self.add_type(rhs, 0);
     if (lhs.is_ty_integer() and rhs.is_ty_integer()) {
         return self.new_node(.{ .kind = .Sub, .lhs = lhs, .rhs = rhs });
     }
     if (lhs.is_ty_pointer() and rhs.is_ty_integer()) {
-        const new_rhs = self.new_node(.{ .kind = .Mul, .lhs = self.scaler, .rhs = rhs });
-        self.add_type(new_rhs);
+        const num = self.new_num(lhs.ty.base.?.size);
+        const new_rhs = self.new_node(.{ .kind = .Mul, .lhs = num, .rhs = rhs });
+        self.add_type(new_rhs, 0);
         return self.new_node(.{ .kind = .Sub, .lhs = lhs, .rhs = new_rhs, .ty = lhs.ty });
     }
     if (lhs.is_ty_pointer() and rhs.is_ty_pointer()) {
-        const node = self.new_node(.{ .kind = .Sub, .lhs = lhs, .rhs = rhs, .ty = &Type.TYPE_INT });
-        return self.new_node(.{ .kind = .Div, .lhs = node, .rhs = self.scaler });
+        const num = self.new_num(rhs.ty.base.?.size);
+        const new_lhs = self.new_node(.{ .kind = .Sub, .lhs = lhs, .rhs = rhs, .ty = &Type.TYPE_INT });
+        return self.new_binary(.Div, new_lhs, num);
     }
     return error.TokenError;
 }
@@ -194,6 +201,14 @@ fn new_func(self: *Self, attr: Function) *Function {
     fun.* = attr;
     fun.assign_lvar_offsets();
     return fun;
+}
+
+fn new_num(self: *Self, val: anytype) *Node {
+    return self.new_node(.{ .kind = .Num, .val = @intCast(i32, val) });
+}
+
+fn new_binary(self: *Self, kind: NodeKind, lhs: *Node, rhs: *Node) *Node {
+    return self.new_node(.{ .kind = kind, .lhs = lhs, .rhs = rhs });
 }
 
 fn new_node(self: *Self, attr: Node) *Node {
@@ -209,7 +224,7 @@ fn new_lvar(self: *Self, ty: *Type, name: []const u8) *Obj {
     obj.ty = ty;
     obj.name = name;
     obj.offset = 0;
-    self.locals.append(obj) catch unreachable;
+    obj.next = null;
     return obj;
 }
 
@@ -219,11 +234,10 @@ fn function(self: *Self) anyerror!*Function {
     return_ty = try self.declarator(return_ty);
     const name = try self.consume_ident();
     const params = try self.func_params();
+    self.locals = params;
     try self.cur_token_skip("{");
     const body = try self.block_stmt();
-    const locals = self.locals.items[0..self.locals.items.len];
-    self.locals = std.ArrayList(*Obj).init(self.allocator);
-    return self.new_func(.{ .body = body, .name = name, .return_ty = return_ty, .params = params, .locals = locals });
+    return self.new_func(.{ .body = body, .name = name, .return_ty = return_ty, .params = params, .locals = self.locals });
 }
 
 // stmt = "return" expr ";"
@@ -288,22 +302,25 @@ fn block_stmt(self: *Self) anyerror!*Node {
             try self.stmt();
         cur.next = node;
         cur = node;
-        self.add_type(cur);
+        self.add_type(cur, 0);
     }
     try self.cur_token_skip("}");
     return self.new_node(.{ .kind = .Block, .body = head.next });
 }
 
-// declaration = declspec declarator ("=" expr)? ("," declarator ("=" expr)?)* ";"
+// declaration = declspec declarator ("["num"]")? ("=" expr)? ("," declarator ("=" expr)?)* ";"
 fn declaration(self: *Self) anyerror!*Node {
     const basety = try self.declspec();
 
     var head = Node{ .kind = .Block };
     var cur = &head;
     while (!self.cur_token_match(";")) {
-        const ty = try self.declarator(basety);
+        var ty = try self.declarator(basety);
         const name = try self.consume_ident();
+        ty = try self.array_suffix(ty);
         var var_ = self.new_lvar(ty, name);
+        var_.next = self.locals;
+        self.locals = var_;
         if (self.cur_token_match("=")) {
             const rhs = try self.assign();
             const lhs = self.new_node(.{ .kind = .Var, .var_ = var_ });
@@ -341,16 +358,33 @@ fn consume_ident(self: *Self) ![]const u8 {
 }
 
 // fucn-params = ("(" params ")")?
-fn func_params(self: *Self) ![]*Obj {
+fn func_params(self: *Self) !?*Obj {
+    var head = Obj{ .name = "head" };
+    var cur = &head;
     try self.cur_token_skip("(");
     while (!self.cur_token_match(")")) {
         var basety = try self.declspec();
-        const ty = try self.declarator(basety);
+        var ty = try self.declarator(basety);
         const name = try self.consume_ident();
-        _ = self.new_lvar(ty, name);
+        ty = try self.array_suffix(ty);
+        const var_ = self.new_lvar(ty, name);
+        cur.next = var_;
+        cur = var_;
         _ = self.cur_token_match(",");
     }
-    return self.locals.items[0..self.locals.items.len];
+    return head.next;
+}
+
+fn array_suffix(self: *Self, basety: *Type) !*Type {
+    var ty = basety;
+    if (self.cur_token_match("[")) {
+        const len = @intCast(usize, try self.cur_token.get_number());
+        const size = ty.size * len;
+        self.advance();
+        ty = self.new_type(.{ .kind = .Array, .base = ty, .array_len = len, .size = size });
+        try self.cur_token_skip("]");
+    }
+    return ty;
 }
 
 // expr-stmt = expr? ";"
@@ -494,7 +528,7 @@ fn primary(self: *Self) anyerror!*Node {
         return node;
     }
     if (self.cur_token.kind == .Num) {
-        const node = self.new_node(.{ .kind = .Num, .val = self.cur_token.val });
+        const node = self.new_num(self.cur_token.val);
         self.advance();
         return node;
     }
@@ -552,39 +586,41 @@ fn peek(self: *Self) *Node {
 }
 
 fn find_var(self: *Self, tok: *Token) ?*Obj {
-    for (self.locals.items) |l| {
-        if (tok.eql(l.name))
-            return l;
+    var locals = self.locals;
+    while (locals) |l| {
+        if (tok.eql(l.name)) return l;
+        locals = l.next;
     }
     return null;
 }
 
-fn add_type(self: *Self, node: ?*Node) void {
+fn add_type(self: *Self, node: ?*Node, depth: usize) void {
     if (node) |n| {
         if (n.ty.kind == .None and n.kind != .Eof) {
-            self.add_type0(n);
+            self.add_type0(n, depth);
         }
     }
 }
 
-fn add_type0(self: *Self, node: *Node) void {
-    std.log.debug("add_type0: {}, {}", .{ node.kind, node.ty });
-    self.add_type(node.lhs);
-    self.add_type(node.rhs);
-    self.add_type(node.cond);
-    self.add_type(node.then);
-    self.add_type(node.els);
-    self.add_type(node.init);
-    self.add_type(node.inc);
+fn add_type0(self: *Self, node: *Node, depth: usize) void {
+    std.log.debug("add_type0: {s}{}, {}", .{ TABS[0 .. depth * 2], node.kind, node.ty });
+    const new_depth = depth + 1;
+    self.add_type(node.lhs, new_depth);
+    self.add_type(node.rhs, new_depth);
+    self.add_type(node.cond, new_depth);
+    self.add_type(node.then, new_depth);
+    self.add_type(node.els, new_depth);
+    self.add_type(node.init, new_depth);
+    self.add_type(node.inc, new_depth);
 
     var body = node.body;
     while (body) |b| {
-        self.add_type(b);
+        self.add_type(b, new_depth);
         body = b.next;
     }
     var args = node.args;
     while (args) |arg| {
-        self.add_type(arg);
+        self.add_type(arg, new_depth);
         args = arg.next;
     }
     switch (node.kind) {
@@ -592,26 +628,33 @@ fn add_type0(self: *Self, node: *Node) void {
             node.ty = node.lhs.?.ty;
         },
         .Addr => {
-            node.ty = self.pointer_to(node.lhs.?.ty);
+            const lhs = node.lhs.?;
+            if (lhs.ty.kind == .Array) {
+                node.ty = self.pointer_to(lhs.ty.base.?);
+            } else {
+                node.ty = self.pointer_to(lhs.ty);
+            }
         },
-        .Equal, .NotEqual, .LessThan, .LessEqual, .Var, .Num, .Funcall => {
+        .Equal, .NotEqual, .LessThan, .LessEqual, .Num, .Funcall => {
             node.ty = &Type.TYPE_INT;
+        },
+        .Var => {
+            node.ty = node.var_.?.ty;
         },
         .Deref => {
             const lhs = node.lhs.?;
-            if (lhs.ty.kind == .Ptr) {
-                node.ty = lhs.ty.base.?;
+            if (lhs.ty.base) |base| {
+                node.ty = base;
             } else {
-                node.ty = &Type.TYPE_INT;
+                unreachable;
             }
         },
         else => return,
     }
-    std.log.debug("add_type0 end: {}, {}", .{ node.kind, node.ty });
 }
 
 fn pointer_to(self: *Self, base: *Type) *Type {
-    return self.new_type(.{ .kind = .Ptr, .base = base });
+    return self.new_type(.{ .kind = .Ptr, .base = base, .size = 8 });
 }
 
 fn new_type(self: *Self, attr: Type) *Type {

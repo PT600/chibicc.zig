@@ -1,5 +1,6 @@
 const std = @import("std");
 const Parser = @import("parser.zig");
+const Type = @import("type.zig");
 const Node = Parser.Node;
 const Function = Parser.Function;
 const utils = @import("utils.zig");
@@ -45,9 +46,13 @@ fn gen_func(self: *Self, func: *Function) anyerror!void {
     println("  mov %rsp, %rbp", .{});
     println("  sub ${d}, %rsp", .{func.stack_size});
 
-    for (func.params, 0..) |p, i| {
+    var params = func.params;
+    var i: usize = 0;
+    while (params) |p| {
         std.log.debug("func.params: {s}", .{p.name});
-        println("  mov {s}, -{d}(%rbp)", .{ arg_regs[i], p.offset });
+        println("  mov {s}, {d}(%rbp)", .{ arg_regs[i], p.offset });
+        params = p.next;
+        i += 1;
     }
 
     try self.gen_stmt(func.body);
@@ -189,11 +194,13 @@ fn gen_unary(self: *Self, node: *Node) anyerror!bool {
         },
         .Deref => {
             try self.gen_expr(node.lhs.?);
-            println(" mov (%rax), %rax", .{});
+            // println(" mov (%rax), %rax", .{});
+            self.load(node.ty);
         },
         .Var => {
             try self.gen_addr(node);
-            println("  mov (%rax), %rax", .{});
+            //println("  mov (%rax), %rax", .{});
+            self.load(node.ty);
         },
         .Assign => {
             try self.gen_addr(node.lhs.?);
@@ -231,11 +238,32 @@ fn gen_addr(self: *Self, node: *Node) anyerror!void {
     switch (node.kind) {
         .Var => {
             const offset = node.var_.?.offset;
-            println("  lea -{d}(%rbp), %rax", .{offset});
+            println("  lea {d}(%rbp), %rax", .{offset});
         },
         .Deref => {
             try self.gen_expr(node.lhs.?);
         },
         else => return error.NotAnLvalue,
     }
+}
+
+fn load(self: *Self, ty: *Type) void {
+    _ = self;
+    if (ty.kind == .Array) {
+        // If it is an array, do not attempt to load a value to the
+        // register because in general we can't load an entire array to a
+        // register. As a result, the result of an evaluation of an array
+        // becomes not the array itself but the address of the array.
+        // This is where "array is automatically converted to a pointer to
+        // the first element of the array in C" occurs.
+        return;
+    }
+    println("  mov (%rax), %rax", .{});
+}
+
+// Store %rax to an address that the stack top is pointing to
+fn store(self: *Self) void {
+    self.pop("%rdi");
+
+    println("  mov %rax, (%rdi)", .{});
 }
