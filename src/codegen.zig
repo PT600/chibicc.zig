@@ -206,8 +206,9 @@ fn gen_unary(self: *Self, node: *Node) anyerror!bool {
             try self.gen_addr(node.lhs.?);
             self.push();
             try self.gen_expr(node.rhs.?);
-            self.pop("%rdi");
-            println("  mov %rax, (%rdi)", .{});
+            //self.pop("%rdi");
+            //println("  mov %rax, (%rdi)", .{});
+            self.store();
         },
         .Funcall => {
             var args = node.args;

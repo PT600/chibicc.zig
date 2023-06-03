@@ -99,9 +99,9 @@ pub const Node = struct {
         return self.ty.kind != .None and self.ty.kind == .Int;
     }
 
-    fn is_ty_pointer(self: *Node) bool {
-        return self.ty.kind != .None and self.ty.kind == .Ptr;
-    }
+    // fn is_ty_pointer(self: *Node) bool {
+    //     return self.ty.kind != .None and self.ty.kind == .Ptr;
+    // }
 
     fn debug(self: *Node, depth: u8) void {
         const tab = TABS[0..(depth * 3)];
@@ -161,16 +161,20 @@ fn new_add(self: *Self, lhs: *Node, rhs: *Node) !*Node {
         return self.new_node(.{ .kind = .Add, .lhs = lhs, .rhs = rhs });
     }
     // num + ptr
-    if (lhs.is_ty_integer() and rhs.is_ty_pointer()) {
-        const num = self.new_num(rhs.ty.base.?.size);
-        const new_rhs = self.new_node(.{ .kind = .Mul, .lhs = num, .rhs = lhs });
-        return self.new_node(.{ .kind = .Add, .lhs = rhs, .rhs = new_rhs });
+    if (lhs.is_ty_integer()) {
+        if (rhs.ty.base) |base| {
+            const num = self.new_num(base.size);
+            const new_rhs = self.new_node(.{ .kind = .Mul, .lhs = num, .rhs = lhs });
+            return self.new_node(.{ .kind = .Add, .lhs = rhs, .rhs = new_rhs });
+        }
     }
     // ptr + num
-    if (lhs.is_ty_pointer() and rhs.is_ty_integer()) {
-        const num = self.new_num(lhs.ty.base.?.size);
-        const new_rhs = self.new_node(.{ .kind = .Mul, .lhs = num, .rhs = rhs });
-        return self.new_node(.{ .kind = .Add, .lhs = lhs, .rhs = new_rhs });
+    if (lhs.ty.base) |base| {
+        if (rhs.is_ty_integer()) {
+            const num = self.new_num(base.size);
+            const new_rhs = self.new_node(.{ .kind = .Mul, .lhs = num, .rhs = rhs });
+            return self.new_node(.{ .kind = .Add, .lhs = lhs, .rhs = new_rhs });
+        }
     }
     std.log.debug("lhs: {} {}, rhs: {} {}", .{ lhs.kind, lhs.ty, rhs.kind, rhs.ty });
     return error.TokenError;
@@ -182,13 +186,16 @@ fn new_sub(self: *Self, lhs: *Node, rhs: *Node) !*Node {
     if (lhs.is_ty_integer() and rhs.is_ty_integer()) {
         return self.new_node(.{ .kind = .Sub, .lhs = lhs, .rhs = rhs });
     }
-    if (lhs.is_ty_pointer() and rhs.is_ty_integer()) {
+    // ptr - num
+    if (lhs.ty.base != null and rhs.is_ty_integer()) {
         const num = self.new_num(lhs.ty.base.?.size);
         const new_rhs = self.new_node(.{ .kind = .Mul, .lhs = num, .rhs = rhs });
         self.add_type(new_rhs, 0);
         return self.new_node(.{ .kind = .Sub, .lhs = lhs, .rhs = new_rhs, .ty = lhs.ty });
     }
-    if (lhs.is_ty_pointer() and rhs.is_ty_pointer()) {
+
+    // ptr - ptr
+    if (lhs.ty.base != null and rhs.ty.base != null) {
         const num = self.new_num(rhs.ty.base.?.size);
         const new_lhs = self.new_node(.{ .kind = .Sub, .lhs = lhs, .rhs = rhs, .ty = &Type.TYPE_INT });
         return self.new_binary(.Div, new_lhs, num);
