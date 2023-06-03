@@ -551,7 +551,18 @@ fn unary(self: *Self) anyerror!*Node {
         const node = try self.unary();
         return self.new_node(.{ .kind = .Deref, .lhs = node });
     }
-    return self.primary();
+    return self.postfix();
+}
+
+fn postfix(self: *Self) anyerror!*Node {
+    var node = try self.primary();
+    while (self.cur_token_match("[")) {
+        const idx = try self.expr();
+        node = try self.new_add(node, idx);
+        node = self.new_node(.{ .kind = .Deref, .lhs = node });
+        try self.cur_token_skip("]");
+    }
+    return node;
 }
 
 // primary = "(" expr ")" | ident args? | num
