@@ -2,7 +2,8 @@ const std = @import("std");
 const Parser = @import("parser.zig");
 const Type = @import("type.zig");
 const Node = Parser.Node;
-const Function = Parser.Function;
+const Obj = Parser.Obj;
+const FunKind = Parser.FunKind;
 const utils = @import("utils.zig");
 const println = utils.println;
 
@@ -13,7 +14,7 @@ const arg_regs = [_][]const u8{ "%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9" };
 
 depth: u32,
 count: u8,
-cur_func: ?*Function = null,
+cur_func: ?*Obj = null,
 
 pub fn init() Self {
     return Self{ .depth = 0, .count = 0 };
@@ -29,18 +30,21 @@ pub fn pop(self: *Self, arg: []const u8) void {
     self.depth -= 1;
 }
 
-pub fn gen(self: *Self, prog: *Function) anyerror!void {
-    var cur: ?*Function = prog;
-    while (cur) |func| {
-        try self.gen_func(func);
-        cur = func.next;
+pub fn gen(self: *Self, prog: *Obj) anyerror!void {
+    var cur: ?*Obj = prog;
+    while (cur) |obj| {
+        if (obj.as_fun()) |fun| {
+            try self.gen_func(obj, fun);
+        }
+        cur = obj.next;
     }
 }
 
-fn gen_func(self: *Self, func: *Function) anyerror!void {
-    self.cur_func = func;
-    println("  .globl {s}", .{func.name});
-    println("{s}:", .{func.name});
+fn gen_func(self: *Self, obj: *Obj, func: *FunKind) anyerror!void {
+    self.cur_func = obj;
+    println("  .globl {s}", .{obj.name});
+    println("  .text", .{});
+    println("{s}:", .{obj.name});
     //Prologue
     println("  push %rbp", .{});
     println("  mov %rsp, %rbp", .{});
@@ -50,14 +54,16 @@ fn gen_func(self: *Self, func: *Function) anyerror!void {
     var i: usize = 0;
     while (params) |p| {
         std.log.debug("func.params: {s}", .{p.name});
-        println("  mov {s}, {d}(%rbp)", .{ arg_regs[i], p.offset });
+        if (p.as_var()) |v| {
+            println("  mov {s}, {d}(%rbp)", .{ arg_regs[i], v.offset });
+        }
         params = p.next;
         i += 1;
     }
 
     try self.gen_stmt(func.body);
     try utils.assert(self.depth == 0);
-    println(".L.return.{s}:", .{func.name});
+    println(".L.return.{s}:", .{obj.name});
     println("  mov %rbp, %rsp", .{});
     println("  pop %rbp", .{});
     println("  ret", .{});
@@ -238,7 +244,7 @@ fn gen_addr(self: *Self, node: *Node) anyerror!void {
     //_ = self;
     switch (node.kind) {
         .Var => {
-            const offset = node.var_.?.offset;
+            const offset = node.var_.?.kind.Var.offset;
             println("  lea {d}(%rbp), %rax", .{offset});
         },
         .Deref => {

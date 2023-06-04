@@ -30,44 +30,66 @@ pub const NodeKind = enum(u8) {
     Funcall,
 };
 
-pub const Obj = struct {
-    name: []const u8,
-    offset: i16 = 0,
-    ty: *Type = &Type.TYPE_NONE,
-    next: ?*Obj = null,
+pub const FunKind = struct {
+    body: *Node,
+    params: ?*Obj = null,
+    locals: ?*Obj = null,
+    stack_size: usize = 0,
 };
 
-pub const Function = struct {
-    name: []const u8,
-    body: *Node = undefined,
-    return_ty: *Type = &Type.TYPE_NONE,
-    locals: ?*Obj = null,
-    params: ?*Obj = null,
-    next: ?*Function = null,
-    stack_size: usize = 0,
+pub const VarKind = struct { offset: i16 = 0 };
 
-    fn assign_lvar_offsets(self: *Function) void {
-        var offset: usize = 0;
-        var locals = self.locals;
-        while (locals) |l| {
-            offset += l.ty.size;
-            l.offset = -@intCast(i16, offset);
-            locals = l.next;
+pub const ObjKind = union(enum) { Var: VarKind, Fun: FunKind };
+
+pub const Obj = struct {
+    name: []const u8,
+    kind: ObjKind,
+    ty: *Type = &Type.TYPE_NONE,
+    next: ?*Obj = null,
+
+    pub fn as_fun(self: *Obj) ?*FunKind {
+        if (self.kind == .Fun) {
+            return &self.kind.Fun;
         }
-        self.stack_size = align_to(offset, 16);
+        return null;
+    }
+
+    pub fn as_var(self: *Obj) ?*VarKind {
+        if (self.kind == .Var) {
+            return &self.kind.Var;
+        }
+        return null;
+    }
+
+    fn assign_lvar_offsets(self: *Obj) void {
+        if (self.as_fun()) |fun| {
+            var offset: usize = 0;
+            var locals = fun.locals;
+            while (locals) |l| {
+                offset += l.ty.size;
+                if (l.as_var()) |v| {
+                    v.offset = -@intCast(i16, offset);
+                }
+                locals = l.next;
+            }
+            fun.stack_size = align_to(offset, 16);
+        }
     }
 
     fn align_to(n: usize, align_: usize) usize {
         return (n + align_ - 1) / align_ * align_;
     }
 
-    fn debug(self: *Function) void {
-        var cur: ?*Function = self;
-        while (cur) |fun| {
+    fn debug(self: *Obj) void {
+        var cur: ?*Obj = self;
+        while (cur) |obj| {
             std.log.debug("*" ** 40, .{});
-            std.log.debug("fun, name: {s}, {any}", .{ fun.name, fun.params });
-            fun.body.debug(0);
-            cur = fun.next;
+            std.log.debug("obj.name: {s}", .{obj.name});
+            if (obj.as_fun()) |fun| {
+                std.log.debug("obj.params: {?}", .{fun.params});
+                fun.body.debug(0);
+            }
+            cur = obj.next;
         }
     }
 };
@@ -131,6 +153,7 @@ allocator: std.mem.Allocator,
 tokenizer: *Tokenizer,
 cur_token: *Token,
 locals: ?*Obj,
+globals: ?*Obj,
 
 pub fn init(allocator: std.mem.Allocator, tokenizer: *Tokenizer, cur_token: *Token) *Self {
     const self = allocator.create(Self) catch unreachable;
@@ -138,20 +161,22 @@ pub fn init(allocator: std.mem.Allocator, tokenizer: *Tokenizer, cur_token: *Tok
     self.tokenizer = tokenizer;
     self.cur_token = cur_token;
     self.locals = null;
+    self.globals = null;
     return self;
 }
 
-pub fn parse(self: *Self) anyerror!*Function {
-    var head = Function{ .name = "" };
-    var cur = &head;
+// program = (function-definition | global-variable)*
+pub fn parse(self: *Self) anyerror!*Obj {
     while (self.cur_token.kind != .Eof) {
         const fun = try self.function();
-        cur.next = fun;
-        cur = fun;
+        fun.next = self.globals;
+        self.globals = fun;
     }
-    const fun = head.next.?;
-    fun.debug();
-    return fun;
+    if (self.globals) |g| {
+        g.debug();
+        return g;
+    }
+    return error.ParseError;
 }
 
 fn new_add(self: *Self, lhs: *Node, rhs: *Node) !*Node {
@@ -203,10 +228,8 @@ fn new_sub(self: *Self, lhs: *Node, rhs: *Node) !*Node {
     return error.TokenError;
 }
 
-fn new_func(self: *Self, attr: Function) *Function {
-    const fun = self.allocator.create(Function) catch unreachable;
-    fun.* = attr;
-    fun.assign_lvar_offsets();
+fn new_func(self: *Self) *Obj {
+    const fun = self.allocator.create(Obj) catch unreachable;
     return fun;
 }
 
@@ -231,21 +254,29 @@ fn new_lvar(self: *Self, ty: *Type, name: []const u8) *Obj {
     const obj = self.allocator.create(Obj) catch unreachable;
     obj.ty = ty;
     obj.name = name;
-    obj.offset = 0;
     obj.next = null;
+    obj.kind = ObjKind{ .Var = .{ .offset = 0 } };
     return obj;
 }
 
 // function = declspec declarator "(" (declspec declarator ",")* ")";
-fn function(self: *Self) anyerror!*Function {
-    var return_ty = try self.declspec();
-    return_ty = try self.declarator(return_ty);
-    const name = try self.consume_ident();
+fn function(self: *Self) anyerror!*Obj {
+    const fun = self.new_func();
+    var ty = try self.declspec();
+    ty = try self.declarator(ty);
+    fun.ty = ty;
+    fun.name = try self.consume_ident();
     const params = try self.func_params();
     self.locals = params;
     try self.cur_token_skip("{");
     const body = try self.block_stmt();
-    return self.new_func(.{ .body = body, .name = name, .return_ty = return_ty, .params = params, .locals = self.locals });
+    fun.kind = ObjKind{ .Fun = FunKind{
+        .params = params,
+        .body = body,
+        .locals = self.locals,
+    } };
+    fun.assign_lvar_offsets();
+    return fun;
 }
 
 // stmt = "return" expr ";"
@@ -367,7 +398,7 @@ fn consume_ident(self: *Self) ![]const u8 {
 
 // fucn-params = ("(" params ")")?
 fn func_params(self: *Self) !?*Obj {
-    var head = Obj{ .name = "head" };
+    var head = Obj{ .name = "head", .kind = undefined };
     var cur = &head;
     try self.cur_token_skip("(");
     while (!self.cur_token_match(")")) {
@@ -614,65 +645,6 @@ fn find_var(self: *Self, tok: *Token) ?*Obj {
         locals = l.next;
     }
     return null;
-}
-
-fn add_type(self: *Self, node: ?*Node, depth: usize) void {
-    if (node) |n| {
-        if (n.ty.kind == .None and n.kind != .Eof) {
-            self.add_type0(n, depth);
-        }
-    }
-}
-
-fn add_type0(self: *Self, node: *Node, depth: usize) void {
-    std.log.debug("add_type0: {s}{}, {}", .{ TABS[0 .. depth * 2], node.kind, node.ty });
-    const new_depth = depth + 1;
-    self.add_type(node.lhs, new_depth);
-    self.add_type(node.rhs, new_depth);
-    self.add_type(node.cond, new_depth);
-    self.add_type(node.then, new_depth);
-    self.add_type(node.els, new_depth);
-    self.add_type(node.init, new_depth);
-    self.add_type(node.inc, new_depth);
-
-    var body = node.body;
-    while (body) |b| {
-        self.add_type(b, new_depth);
-        body = b.next;
-    }
-    var args = node.args;
-    while (args) |arg| {
-        self.add_type(arg, new_depth);
-        args = arg.next;
-    }
-    switch (node.kind) {
-        .Add, .Sub, .Mul, .Div, .Neg, .Assign => {
-            node.ty = node.lhs.?.ty;
-        },
-        .Addr => {
-            const lhs = node.lhs.?;
-            if (lhs.ty.kind == .Array) {
-                node.ty = self.pointer_to(lhs.ty.base.?);
-            } else {
-                node.ty = self.pointer_to(lhs.ty);
-            }
-        },
-        .Equal, .NotEqual, .LessThan, .LessEqual, .Num, .Funcall => {
-            node.ty = &Type.TYPE_INT;
-        },
-        .Var => {
-            node.ty = node.var_.?.ty;
-        },
-        .Deref => {
-            const lhs = node.lhs.?;
-            if (lhs.ty.base) |base| {
-                node.ty = base;
-            } else {
-                unreachable;
-            }
-        },
-        else => return,
-    }
 }
 
 fn parse_type(self: *Self, node: *Node) void {
