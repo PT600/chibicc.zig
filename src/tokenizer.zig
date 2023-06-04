@@ -68,6 +68,7 @@ const KEYWORDS = [_][]const u8{
     "else",
     "for",
     "while",
+    "sizeof",
 };
 
 fn is_keyword(word: []const u8) bool {

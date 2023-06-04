@@ -227,33 +227,6 @@ fn new_node(self: *Self, attr: Node) *Node {
     return node;
 }
 
-fn parse_type(self: *Self, node: *Node) void {
-    if (node.ty.kind != .None) return;
-    switch (node.kind) {
-        .Add, .Sub, .Mul, .Div, .Neg, .Assign => {
-            node.ty = node.lhs.?.ty;
-        },
-        .Addr => {
-            const lhs = node.lhs.?;
-            if (lhs.ty.kind == .Array) {
-                node.ty = self.pointer_to(lhs.ty.base.?);
-            } else {
-                node.ty = self.pointer_to(lhs.ty);
-            }
-        },
-        .Equal, .NotEqual, .LessThan, .LessEqual, .Num, .Funcall => {
-            node.ty = &Type.TYPE_INT;
-        },
-        .Var => {
-            node.ty = node.var_.?.ty;
-        },
-        .Deref => {
-            node.ty = node.lhs.?.ty.base.?;
-        },
-        else => return,
-    }
-}
-
 fn new_lvar(self: *Self, ty: *Type, name: []const u8) *Obj {
     const obj = self.allocator.create(Obj) catch unreachable;
     obj.ty = ty;
@@ -567,11 +540,14 @@ fn postfix(self: *Self) anyerror!*Node {
 
 // primary = "(" expr ")" | ident args? | num
 fn primary(self: *Self) anyerror!*Node {
-    if (self.cur_token.eql("(")) {
-        self.advance();
-        const node = self.expr();
+    if (self.cur_token_match("(")) {
+        const node = try self.expr();
         self.cur_token = try self.cur_token.skip(")");
         return node;
+    }
+    if (self.cur_token_match("sizeof")) {
+        const node = try self.unary();
+        return self.new_num(node.ty.size);
     }
     if (self.cur_token.kind == .Num) {
         const node = self.new_num(self.cur_token.val);
@@ -694,6 +670,33 @@ fn add_type0(self: *Self, node: *Node, depth: usize) void {
             } else {
                 unreachable;
             }
+        },
+        else => return,
+    }
+}
+
+fn parse_type(self: *Self, node: *Node) void {
+    if (node.ty.kind != .None) return;
+    switch (node.kind) {
+        .Add, .Sub, .Mul, .Div, .Neg, .Assign => {
+            node.ty = node.lhs.?.ty;
+        },
+        .Addr => {
+            const lhs = node.lhs.?;
+            if (lhs.ty.kind == .Array) {
+                node.ty = self.pointer_to(lhs.ty.base.?);
+            } else {
+                node.ty = self.pointer_to(lhs.ty);
+            }
+        },
+        .Equal, .NotEqual, .LessThan, .LessEqual, .Num, .Funcall => {
+            node.ty = &Type.TYPE_INT;
+        },
+        .Var => {
+            node.ty = node.var_.?.ty;
+        },
+        .Deref => {
+            node.ty = node.lhs.?.ty.base.?;
         },
         else => return,
     }
