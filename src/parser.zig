@@ -37,7 +37,7 @@ pub const FunKind = struct {
     stack_size: usize = 0,
 };
 
-pub const VarKind = struct { offset: i16 = 0 };
+pub const VarKind = struct { offset: i16 = 0, local: bool = true };
 
 pub const ObjKind = union(enum) { Var: VarKind, Fun: FunKind };
 
@@ -61,7 +61,7 @@ pub const Obj = struct {
         return null;
     }
 
-    fn assign_lvar_offsets(self: *Obj) void {
+    pub fn assign_lvar_offsets(self: *Obj) void {
         if (self.as_fun()) |fun| {
             var offset: usize = 0;
             var locals = fun.locals;
@@ -168,9 +168,18 @@ pub fn init(allocator: std.mem.Allocator, tokenizer: *Tokenizer, cur_token: *Tok
 // program = (function-definition | global-variable)*
 pub fn parse(self: *Self) anyerror!*Obj {
     while (self.cur_token.kind != .Eof) {
-        const fun = try self.function();
-        fun.next = self.globals;
-        self.globals = fun;
+        var basety = try self.declspec();
+        var decl = try self.declarator(basety);
+        if (decl.is_function) {
+            _ = try self.function(decl.ty, decl.name);
+        } else {
+            _ = try self.global_variable(decl.ty, decl.name);
+            while (!self.cur_token_match(";")) {
+                try self.cur_token_skip(",");
+                decl = try self.declarator(basety);
+                _ = try self.global_variable(decl.ty, decl.name);
+            }
+        }
     }
     if (self.globals) |g| {
         g.debug();
@@ -250,22 +259,27 @@ fn new_node(self: *Self, attr: Node) *Node {
     return node;
 }
 
-fn new_lvar(self: *Self, ty: *Type, name: []const u8) *Obj {
+fn new_var(self: *Self, ty: *Type, name: []const u8, local: bool) *Obj {
     const obj = self.allocator.create(Obj) catch unreachable;
     obj.ty = ty;
     obj.name = name;
     obj.next = null;
-    obj.kind = ObjKind{ .Var = .{ .offset = 0 } };
+    obj.kind = ObjKind{ .Var = .{ .offset = 0, .local = local } };
+    return obj;
+}
+
+fn global_variable(self: *Self, ty: *Type, name: []const u8) anyerror!*Obj {
+    var obj = self.new_var(ty, name, false);
+    obj.next = self.globals;
+    self.globals = obj;
     return obj;
 }
 
 // function = declspec declarator "(" (declspec declarator ",")* ")";
-fn function(self: *Self) anyerror!*Obj {
+fn function(self: *Self, ty: *Type, name: []const u8) anyerror!*Obj {
     const fun = self.new_func();
-    var ty = try self.declspec();
-    ty = try self.declarator(ty);
     fun.ty = ty;
-    fun.name = try self.consume_ident();
+    fun.name = name;
     const params = try self.func_params();
     self.locals = params;
     try self.cur_token_skip("{");
@@ -275,7 +289,8 @@ fn function(self: *Self) anyerror!*Obj {
         .body = body,
         .locals = self.locals,
     } };
-    fun.assign_lvar_offsets();
+    fun.next = self.globals;
+    self.globals = fun;
     return fun;
 }
 
@@ -354,10 +369,8 @@ fn declaration(self: *Self) anyerror!*Node {
     var head = Node{ .kind = .Block };
     var cur = &head;
     while (!self.cur_token_match(";")) {
-        var ty = try self.declarator(basety);
-        const name = try self.consume_ident();
-        ty = try self.array_suffix(ty);
-        var var_ = self.new_lvar(ty, name);
+        var decl = try self.declarator(basety);
+        var var_ = self.new_var(decl.ty, decl.name, true);
         var_.next = self.locals;
         self.locals = var_;
         if (self.cur_token_match("=")) {
@@ -378,14 +391,26 @@ fn declspec(self: *Self) !*Type {
     return &Type.TYPE_INT;
 }
 
+const Declarator = struct {
+    ty: *Type,
+    name: []const u8,
+    is_function: bool,
+};
+
 // declarator = "*" * Ident
-fn declarator(self: *Self, base: *Type) !*Type {
+fn declarator(self: *Self, basety: *Type) !Declarator {
     _ = self.cur_token_match(",");
-    var ty = base;
+    var ty = basety;
     while (self.cur_token_match("*")) {
         ty = self.pointer_to(ty);
     }
-    return ty;
+    const name = try self.consume_ident();
+    var is_function = true;
+    if (!self.cur_token.eql("(")) {
+        is_function = false;
+        ty = try self.array_suffix(ty);
+    }
+    return .{ .ty = ty, .name = name, .is_function = is_function };
 }
 
 fn consume_ident(self: *Self) ![]const u8 {
@@ -403,10 +428,8 @@ fn func_params(self: *Self) !?*Obj {
     try self.cur_token_skip("(");
     while (!self.cur_token_match(")")) {
         var basety = try self.declspec();
-        var ty = try self.declarator(basety);
-        const name = try self.consume_ident();
-        ty = try self.array_suffix(ty);
-        const var_ = self.new_lvar(ty, name);
+        var decl = try self.declarator(basety);
+        const var_ = self.new_var(decl.ty, decl.name, true);
         cur.next = var_;
         cur = var_;
         _ = self.cur_token_match(",");
@@ -643,6 +666,11 @@ fn find_var(self: *Self, tok: *Token) ?*Obj {
     while (locals) |l| {
         if (tok.eql(l.name)) return l;
         locals = l.next;
+    }
+    var globals = self.globals;
+    while (globals) |l| {
+        if (tok.eql(l.name)) return l;
+        globals = l.next;
     }
     return null;
 }

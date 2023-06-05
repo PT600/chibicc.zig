@@ -31,9 +31,29 @@ pub fn pop(self: *Self, arg: []const u8) void {
 }
 
 pub fn gen(self: *Self, prog: *Obj) anyerror!void {
+    try self.emit_data(prog);
+    try self.emit_text(prog);
+}
+
+fn emit_data(self: *Self, prog: *Obj) anyerror!void {
+    _ = self;
+    var cur: ?*Obj = prog;
+    while (cur) |obj| {
+        if (obj.as_var()) |_| {
+            println("  .data", .{});
+            println("  .globl {s}", .{obj.name});
+            println("{s}:", .{obj.name});
+            println("  .zero {d}", .{obj.ty.size});
+        }
+        cur = obj.next;
+    }
+}
+
+fn emit_text(self: *Self, prog: *Obj) anyerror!void {
     var cur: ?*Obj = prog;
     while (cur) |obj| {
         if (obj.as_fun()) |fun| {
+            obj.assign_lvar_offsets();
             try self.gen_func(obj, fun);
         }
         cur = obj.next;
@@ -244,8 +264,16 @@ fn gen_addr(self: *Self, node: *Node) anyerror!void {
     //_ = self;
     switch (node.kind) {
         .Var => {
-            const offset = node.var_.?.kind.Var.offset;
-            println("  lea {d}(%rbp), %rax", .{offset});
+            const var_ = node.var_.?;
+            if (var_.as_var()) |v| {
+                if (v.local) {
+                    println("  lea {d}(%rbp), %rax", .{v.offset});
+                } else {
+                    println("  lea {s}(%rip), %rax", .{var_.name});
+                }
+            } else {
+                return error.NotAnLvalue;
+            }
         },
         .Deref => {
             try self.gen_expr(node.lhs.?);
