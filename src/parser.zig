@@ -118,7 +118,7 @@ pub const Node = struct {
     args: ?*Node = null,
 
     fn is_ty_integer(self: *Node) bool {
-        return self.ty.kind != .None and self.ty.kind == .Int;
+        return self.ty.kind == .Int or self.ty.kind == .Char;
     }
 
     // fn is_ty_pointer(self: *Node) bool {
@@ -168,7 +168,7 @@ pub fn init(allocator: std.mem.Allocator, tokenizer: *Tokenizer, cur_token: *Tok
 // program = (function-definition | global-variable)*
 pub fn parse(self: *Self) anyerror!*Obj {
     while (self.cur_token.kind != .Eof) {
-        var basety = try self.declspec();
+        var basety = self.declspec().?;
         var decl = try self.declarator(basety);
         if (decl.is_function) {
             _ = try self.function(decl.ty, decl.name);
@@ -275,7 +275,7 @@ fn global_variable(self: *Self, ty: *Type, name: []const u8) anyerror!*Obj {
     return obj;
 }
 
-// function = declspec declarator "(" (declspec declarator ",")* ")";
+// function = "(" (declspec declarator ",")* ")" "{" body "}";
 fn function(self: *Self, ty: *Type, name: []const u8) anyerror!*Obj {
     const fun = self.new_func();
     fun.ty = ty;
@@ -350,8 +350,8 @@ fn block_stmt(self: *Self) anyerror!*Node {
     var head = Node{ .kind = .Stmt };
     var cur = &head;
     while (!self.cur_token.eql("}")) {
-        const node = if (self.cur_token.eql("int"))
-            try self.declaration()
+        const node = if (self.declspec()) |basety|
+            try self.declaration(basety)
         else
             try self.stmt();
         cur.next = node;
@@ -362,10 +362,8 @@ fn block_stmt(self: *Self) anyerror!*Node {
     return self.new_node(.{ .kind = .Block, .body = head.next });
 }
 
-// declaration = declspec declarator ("["num"]")? ("=" expr)? ("," declarator ("=" expr)?)* ";"
-fn declaration(self: *Self) anyerror!*Node {
-    const basety = try self.declspec();
-
+// declaration = declarator ("["num"]")? ("=" expr)? ("," declarator ("=" expr)?)* ";"
+fn declaration(self: *Self, basety: *Type) anyerror!*Node {
     var head = Node{ .kind = .Block };
     var cur = &head;
     while (!self.cur_token_match(";")) {
@@ -386,9 +384,13 @@ fn declaration(self: *Self) anyerror!*Node {
     return node;
 }
 
-fn declspec(self: *Self) !*Type {
-    try self.cur_token_skip("int");
-    return &Type.TYPE_INT;
+fn declspec(self: *Self) ?*Type {
+    if (self.cur_token_match("int")) {
+        return &Type.TYPE_INT;
+    } else if (self.cur_token_match("char")) {
+        return &Type.TYPE_CHAR;
+    }
+    return null;
 }
 
 const Declarator = struct {
@@ -427,7 +429,7 @@ fn func_params(self: *Self) !?*Obj {
     var cur = &head;
     try self.cur_token_skip("(");
     while (!self.cur_token_match(")")) {
-        var basety = try self.declspec();
+        var basety = self.declspec().?;
         var decl = try self.declarator(basety);
         const var_ = self.new_var(decl.ty, decl.name, true);
         cur.next = var_;

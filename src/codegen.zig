@@ -10,7 +10,8 @@ const println = utils.println;
 const GenError = error{ InvalidExpression, InvalidStmt, NotAnLvalue };
 
 const Self = @This();
-const arg_regs = [_][]const u8{ "%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9" };
+const arg_regs8 = [_][]const u8{ "%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b" };
+const arg_regs64 = [_][]const u8{ "%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9" };
 
 depth: u32,
 count: u8,
@@ -75,7 +76,11 @@ fn gen_func(self: *Self, obj: *Obj, func: *FunKind) anyerror!void {
     while (params) |p| {
         std.log.debug("func.params: {s}", .{p.name});
         if (p.as_var()) |v| {
-            println("  mov {s}, {d}(%rbp)", .{ arg_regs[i], v.offset });
+            if (p.ty.size == 1) {
+                println("  mov {s}, {d}(%rbp)", .{ arg_regs8[i], v.offset });
+            } else {
+                println("  mov {s}, {d}(%rbp)", .{ arg_regs64[i], v.offset });
+            }
         }
         params = p.next;
         i += 1;
@@ -234,7 +239,7 @@ fn gen_unary(self: *Self, node: *Node) anyerror!bool {
             try self.gen_expr(node.rhs.?);
             //self.pop("%rdi");
             //println("  mov %rax, (%rdi)", .{});
-            self.store();
+            self.store(node.ty);
         },
         .Funcall => {
             var args = node.args;
@@ -242,12 +247,12 @@ fn gen_unary(self: *Self, node: *Node) anyerror!bool {
             while (args) |arg| {
                 try self.gen_expr(arg);
                 self.push();
-                //println("  mov %rax, {s}", .{arg_regs[nargs]});
+                //println("  mov %rax, {s}", .{arg_regs64[nargs]});
                 nargs += 1;
                 args = arg.next;
             }
             while (nargs > 0) {
-                self.pop(arg_regs[nargs - 1]);
+                self.pop(arg_regs64[nargs - 1]);
                 nargs -= 1;
             }
             println("  mov $0, %rax", .{});
@@ -293,12 +298,20 @@ fn load(self: *Self, ty: *Type) void {
         // the first element of the array in C" occurs.
         return;
     }
-    println("  mov (%rax), %rax", .{});
+    if (ty.size == 1) {
+        println("  movsbq (%rax), %rax", .{});
+    } else {
+        println("  mov (%rax), %rax", .{});
+    }
 }
 
 // Store %rax to an address that the stack top is pointing to
-fn store(self: *Self) void {
+fn store(self: *Self, ty: *Type) void {
     self.pop("%rdi");
 
-    println("  mov %rax, (%rdi)", .{});
+    if (ty.size == 1) {
+        println("  mov %al, (%rdi)", .{});
+    } else {
+        println("  mov %rax, (%rdi)", .{});
+    }
 }

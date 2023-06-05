@@ -3,6 +3,7 @@ const std = @import("std");
 const Token = @import("tokenizer.zig").Token;
 
 pub const TypeKind = enum(u8) {
+    Char,
     Int,
     Ptr,
     Func,
@@ -12,6 +13,7 @@ pub const TypeKind = enum(u8) {
 
 const Self = @This();
 
+pub var TYPE_CHAR = Self{ .kind = .Char, .size = 1 };
 pub var TYPE_INT = Self{ .kind = .Int, .size = 8 };
 pub var TYPE_NONE = Self{ .kind = .None, .size = 0 };
 
@@ -33,7 +35,7 @@ size: usize, // sizeof() value
 // the C spec.
 
 pub fn is_integer(self: *Self) bool {
-    return self.kind == .Int;
+    return self.kind == .Int or self.kind == .Char;
 }
 
 pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
