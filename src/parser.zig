@@ -2,6 +2,7 @@ const std = @import("std");
 const utils = @import("utils.zig");
 const Tokenizer = @import("tokenizer.zig");
 const Token = Tokenizer.Token;
+const TokenKind = Tokenizer.TokenKind;
 const Type = @import("type.zig");
 
 pub const NodeKind = enum(u8) {
@@ -37,7 +38,11 @@ pub const FunKind = struct {
     stack_size: usize = 0,
 };
 
-pub const VarKind = struct { offset: i16 = 0, local: bool = true };
+pub const VarKind = struct {
+    offset: i16 = 0,
+    local: bool = true,
+    init_data: ?[]const u8 = null,
+};
 
 pub const ObjKind = union(enum) { Var: VarKind, Fun: FunKind };
 
@@ -154,6 +159,7 @@ tokenizer: *Tokenizer,
 cur_token: *Token,
 locals: ?*Obj,
 globals: ?*Obj,
+name_idx: u8 = 0,
 
 pub fn init(allocator: std.mem.Allocator, tokenizer: *Tokenizer, cur_token: *Token) *Self {
     const self = allocator.create(Self) catch unreachable;
@@ -173,11 +179,11 @@ pub fn parse(self: *Self) anyerror!*Obj {
         if (decl.is_function) {
             _ = try self.function(decl.ty, decl.name);
         } else {
-            _ = try self.global_variable(decl.ty, decl.name);
+            _ = self.global_variable(decl.ty, decl.name, .{});
             while (!self.cur_token_match(";")) {
                 try self.cur_token_skip(",");
                 decl = try self.declarator(basety);
-                _ = try self.global_variable(decl.ty, decl.name);
+                _ = self.global_variable(decl.ty, decl.name, .{});
             }
         }
     }
@@ -259,17 +265,18 @@ fn new_node(self: *Self, attr: Node) *Node {
     return node;
 }
 
-fn new_var(self: *Self, ty: *Type, name: []const u8, local: bool) *Obj {
+fn new_var(self: *Self, ty: *Type, name: []const u8, kind: VarKind) *Obj {
     const obj = self.allocator.create(Obj) catch unreachable;
     obj.ty = ty;
     obj.name = name;
     obj.next = null;
-    obj.kind = ObjKind{ .Var = .{ .offset = 0, .local = local } };
+    obj.kind = ObjKind{ .Var = kind };
     return obj;
 }
 
-fn global_variable(self: *Self, ty: *Type, name: []const u8) anyerror!*Obj {
-    var obj = self.new_var(ty, name, false);
+fn global_variable(self: *Self, ty: *Type, name: []const u8, kind: VarKind) *Obj {
+    var obj = self.new_var(ty, name, kind);
+    obj.kind.Var.local = false;
     obj.next = self.globals;
     self.globals = obj;
     return obj;
@@ -368,7 +375,7 @@ fn declaration(self: *Self, basety: *Type) anyerror!*Node {
     var cur = &head;
     while (!self.cur_token_match(";")) {
         var decl = try self.declarator(basety);
-        var var_ = self.new_var(decl.ty, decl.name, true);
+        var var_ = self.new_var(decl.ty, decl.name, .{});
         var_.next = self.locals;
         self.locals = var_;
         if (self.cur_token_match("=")) {
@@ -431,7 +438,7 @@ fn func_params(self: *Self) !?*Obj {
     while (!self.cur_token_match(")")) {
         var basety = self.declspec().?;
         var decl = try self.declarator(basety);
-        const var_ = self.new_var(decl.ty, decl.name, true);
+        const var_ = self.new_var(decl.ty, decl.name, .{});
         cur.next = var_;
         cur = var_;
         _ = self.cur_token_match(",");
@@ -605,25 +612,71 @@ fn primary(self: *Self) anyerror!*Node {
         const node = try self.unary();
         return self.new_num(node.ty.size);
     }
-    if (self.cur_token.kind == .Num) {
-        const node = self.new_num(self.cur_token.val);
-        self.advance();
+    if (self.cur_token_match_kind(.Num)) |tok| {
+        const node = self.new_num(tok.val);
         return node;
     }
-    if (self.cur_token.kind == .Ident) {
-        if (token_match(self.cur_token.next, "(")) return self.funcall();
-        const var_ = self.find_var(self.cur_token) orelse return error.ParseError;
+    if (self.cur_token_match_kind(.Ident)) |tok| {
+        if (self.cur_token_match("(")) return self.funcall(tok.loc);
+        const var_ = self.find_var(tok) orelse return error.ParseError;
         const node = self.new_node(.{ .kind = .Var, .var_ = var_ });
-        self.advance();
+        return node;
+    }
+    if (self.cur_token_match_kind(.Str)) |tok| {
+        const name = try self.new_unique_name();
+
+        const init_data0 = tok.loc[1..(tok.loc.len - 1)];
+        var init_data = self.parse_str(init_data0);
+        const ty = self.new_array_type(&Type.TYPE_CHAR, init_data.len);
+        const var_ = self.global_variable(ty, name, .{ .init_data = init_data });
+        const node = self.new_node(.{ .kind = .Var, .var_ = var_ });
         return node;
     }
     return self.cur_token.error_tok("expected an expression\n", .{});
 }
 
-fn funcall(self: *Self) anyerror!*Node {
-    const node = self.new_node(.{ .kind = .Funcall, .funcname = self.cur_token.loc });
-    self.advance();
-    self.advance();
+fn parse_str(self: *Self, str: []const u8) []const u8 {
+    var buf = self.allocator.alloc(u8, str.len + 1) catch unreachable;
+    var len: usize = 0;
+    var p = str.ptr;
+    var end = p + str.len;
+    while (@ptrToInt(p) < @ptrToInt(end)) {
+        if (p[0] == '\\') {
+            buf[len] = read_escaped_char(p[1]);
+            p += 2;
+            len += 1;
+        } else {
+            buf[len] = p[0];
+            p += 1;
+            len += 1;
+        }
+    }
+    buf[len] = 0;
+    len += 1;
+    return buf[0..len];
+}
+
+fn read_escaped_char(c: u8) u8 {
+    return switch (c) {
+        'a' => 0x07,
+        'b' => 0x08,
+        't' => 0x09,
+        'n' => 0x0A,
+        'v' => 0x0B,
+        'f' => 0x0C,
+        'r' => 0x0D,
+        'e' => 27,
+        else => c,
+    };
+}
+
+fn new_unique_name(self: *Self) anyerror![]const u8 {
+    self.name_idx += 1;
+    return std.fmt.allocPrint(self.allocator, ".L..{d}", .{self.name_idx});
+}
+
+fn funcall(self: *Self, funcname: []const u8) anyerror!*Node {
+    const node = self.new_node(.{ .kind = .Funcall, .funcname = funcname });
     var head = Node{ .kind = .Stmt };
     var cur = &head;
     while (!self.cur_token_match(")")) {
@@ -642,6 +695,15 @@ fn cur_token_match(self: *Self, tok: []const u8) bool {
         return true;
     }
     return false;
+}
+
+fn cur_token_match_kind(self: *Self, kind: TokenKind) ?*Token {
+    if (self.cur_token.kind == kind) {
+        const token = self.cur_token;
+        self.advance();
+        return token;
+    }
+    return null;
 }
 
 fn token_match(tok: ?*Token, name: []const u8) bool {

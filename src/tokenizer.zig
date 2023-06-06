@@ -8,6 +8,7 @@ pub const TokenKind = enum {
     Ident,
     Keyword,
     Num,
+    Str,
     Eof,
 };
 
@@ -157,6 +158,20 @@ pub fn tokenize(self: *Self) anyerror!*Token {
             cur = cur.next;
             convert_keyword(cur);
             p = pp;
+            continue;
+        }
+        if (p[0] == '"') {
+            var pp = p + 1;
+            while (pp[0] != '"') {
+                if (pp[0] == '\n') // or pp[0] == '\0')
+                    return self.error_at(pp, "unclosed string literal", .{});
+                pp += 1;
+            }
+            const end = @ptrToInt(pp + 1) - @ptrToInt(p);
+            const loc = p[0..end];
+            cur.next = self.new_token(.{ .kind = .Str, .loc = loc });
+            cur = cur.next;
+            p = pp + 1;
             continue;
         }
 

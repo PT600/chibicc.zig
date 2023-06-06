@@ -40,11 +40,17 @@ fn emit_data(self: *Self, prog: *Obj) anyerror!void {
     _ = self;
     var cur: ?*Obj = prog;
     while (cur) |obj| {
-        if (obj.as_var()) |_| {
+        if (obj.as_var()) |v| {
             println("  .data", .{});
             println("  .globl {s}", .{obj.name});
             println("{s}:", .{obj.name});
-            println("  .zero {d}", .{obj.ty.size});
+            if (v.init_data) |init_data| {
+                for (init_data) |b| {
+                    println("  .byte {d}", .{b});
+                }
+            } else {
+                println("  .zero {d}", .{obj.ty.size});
+            }
         }
         cur = obj.next;
     }
