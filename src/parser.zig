@@ -159,7 +159,7 @@ tokenizer: *Tokenizer,
 cur_token: *Token,
 locals: ?*Obj,
 globals: ?*Obj,
-name_idx: u8 = 0,
+name_idx: u8,
 
 pub fn init(allocator: std.mem.Allocator, tokenizer: *Tokenizer, cur_token: *Token) *Self {
     const self = allocator.create(Self) catch unreachable;
@@ -168,6 +168,7 @@ pub fn init(allocator: std.mem.Allocator, tokenizer: *Tokenizer, cur_token: *Tok
     self.cur_token = cur_token;
     self.locals = null;
     self.globals = null;
+    self.name_idx = 0;
     return self;
 }
 
@@ -642,8 +643,15 @@ fn parse_str(self: *Self, str: []const u8) []const u8 {
     var end = p + str.len;
     while (@ptrToInt(p) < @ptrToInt(end)) {
         if (p[0] == '\\') {
-            buf[len] = read_escaped_char(p[1]);
-            p += 2;
+            p += 1;
+            if ('0' <= p[0] and p[0] <= '7') {
+                buf[len] = read_octal_number(&p);
+            } else if ('x' == p[0]) {
+                buf[len] = read_hex_number(&p);
+            } else {
+                buf[len] = read_escaped_char(p[0]);
+                p += 1;
+            }
             len += 1;
         } else {
             buf[len] = p[0];
@@ -654,6 +662,44 @@ fn parse_str(self: *Self, str: []const u8) []const u8 {
     buf[len] = 0;
     len += 1;
     return buf[0..len];
+}
+
+fn read_hex_number(pp: *[*]const u8) u8 {
+    var p = pp.*;
+    p += 1;
+    var c: u8 = 0;
+    while (from_hex(p[0])) |hex| {
+        c = (c << 4) + hex;
+        p += 1;
+    }
+    pp.* = p;
+    return c;
+}
+
+fn from_hex(c: u8) ?u8 {
+    if ('0' <= c and c <= '9')
+        return c - '0';
+    if ('a' <= c and c <= 'f')
+        return c - 'a' + 10;
+    if ('A' <= c and c <= 'F')
+        return c - 'A' + 10;
+    return null;
+}
+
+fn read_octal_number(pp: *[*]const u8) u8 {
+    var p = pp.*;
+    var c = p[0] - '0';
+    p += 1;
+    if ('0' <= p[0] and p[0] <= '7') {
+        c = (c << 3) + p[0] - '0';
+        p += 1;
+        if ('0' <= p[0] and p[0] <= '7') {
+            c = (c << 3) + p[0] - '0';
+            p += 1;
+        }
+    }
+    pp.* = p;
+    return c;
 }
 
 fn read_escaped_char(c: u8) u8 {
