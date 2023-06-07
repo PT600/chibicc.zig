@@ -18,6 +18,7 @@ pub const NodeKind = enum(u8) {
     LessEqual,
     // Note: no > and >=
     Stmt,
+    StmtExpr,
     If,
     For,
     While,
@@ -91,7 +92,7 @@ pub const Obj = struct {
             std.log.debug("*" ** 40, .{});
             std.log.debug("obj.name: {s}", .{obj.name});
             if (obj.as_fun()) |fun| {
-                std.log.debug("obj.params: {?}", .{fun.params});
+                std.log.debug("obj.is_function, params: {?}", .{fun.params});
                 fun.body.debug(0);
             }
             cur = obj.next;
@@ -106,7 +107,7 @@ pub const Node = struct {
     tok: ?*Token = null,
     lhs: ?*Node = null,
     rhs: ?*Node = null,
-    // block
+    // block or Statement Expression
     body: ?*Node = null,
 
     // "if" statment
@@ -602,11 +603,17 @@ fn postfix(self: *Self) anyerror!*Node {
     return node;
 }
 
-// primary = "(" expr ")" | ident args? | num
+// primary = "(" "{"stmt"}" | expr ")" | ident args? | num
 fn primary(self: *Self) anyerror!*Node {
     if (self.cur_token_match("(")) {
+        if (self.cur_token_match("{")) {
+            const block = try self.block_stmt();
+            const node = self.new_node(.{ .kind = .StmtExpr, .body = block.body });
+            try self.cur_token_skip(")");
+            return node;
+        }
         const node = try self.expr();
-        self.cur_token = try self.cur_token.skip(")");
+        try self.cur_token_skip(")");
         return node;
     }
     if (self.cur_token_match("sizeof")) {
@@ -807,6 +814,16 @@ fn parse_type(self: *Self, node: *Node) void {
         },
         .Deref => {
             node.ty = node.lhs.?.ty.base.?;
+        },
+        .Stmt => {
+            node.ty = node.lhs.?.ty;
+        },
+        .StmtExpr => {
+            var body = node.body.?;
+            while (body.next) |b| {
+                body = b;
+            }
+            node.ty = body.ty;
         },
         else => return,
     }

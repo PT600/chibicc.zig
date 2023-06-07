@@ -247,6 +247,13 @@ fn gen_unary(self: *Self, node: *Node) anyerror!bool {
             //println("  mov %rax, (%rdi)", .{});
             self.store(node.ty);
         },
+        .StmtExpr => {
+            var body = node.body;
+            while (body) |b| {
+                try self.gen_stmt(b);
+                body = b.next;
+            }
+        },
         .Funcall => {
             var args = node.args;
             var nargs: usize = 0;
