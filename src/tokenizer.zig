@@ -85,13 +85,28 @@ const Self = @This();
 
 allocator: std.mem.Allocator,
 source: [*:0]const u8,
+cur_filename: [*:0]const u8,
 
-pub fn init(allocator: std.mem.Allocator, source: [*:0]const u8) Self {
+pub fn init(allocator: std.mem.Allocator, path: [*:0]const u8) !Self {
+    const source = try read_file(allocator, path);
     std.log.info("source: {s}", .{source});
     return Self{
         .allocator = allocator,
         .source = source,
+        .cur_filename = path,
     };
+}
+
+fn read_file(allocator: std.mem.Allocator, path: [*:0]const u8) anyerror![*:0]const u8 {
+    const fp: std.fs.File = if (path[0] == '-')
+        std.io.getStdIn()
+    else
+        try std.fs.openFileAbsoluteZ(path, .{});
+    defer fp.close();
+    var buf = std.ArrayList(u8).init(allocator);
+    try fp.reader().readAllArrayList(&buf, 1 * 1024 * 1024);
+    try buf.append(0);
+    return @ptrCast([*:0]const u8, buf.items.ptr);
 }
 
 pub fn debug_token(self: *Self, token: *Token) !void {

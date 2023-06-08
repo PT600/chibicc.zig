@@ -15,7 +15,7 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    var tokenizer = Tokenizer.init(allocator, argv[1]);
+    var tokenizer = try Tokenizer.init(allocator, argv[1]);
     const token = try tokenizer.tokenize();
     var parser = Parser.init(allocator, &tokenizer, token);
     const func = try parser.parse();
