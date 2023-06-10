@@ -5,7 +5,6 @@ const Node = Parser.Node;
 const Obj = Parser.Obj;
 const FunKind = Parser.FunKind;
 const utils = @import("utils.zig");
-const println = utils.println;
 
 const GenError = error{ InvalidExpression, InvalidStmt, NotAnLvalue };
 
@@ -16,18 +15,19 @@ const arg_regs64 = [_][]const u8{ "%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9" }
 depth: u32,
 count: u8,
 cur_func: ?*Obj = null,
+output_file: std.fs.File,
 
-pub fn init() Self {
-    return Self{ .depth = 0, .count = 0 };
+pub fn init(output_file: std.fs.File) Self {
+    return Self{ .depth = 0, .count = 0, .output_file = output_file };
 }
 
 pub fn push(self: *Self) void {
-    println("  push %rax", .{});
+    self.println("  push %rax", .{});
     self.depth += 1;
 }
 
 pub fn pop(self: *Self, arg: []const u8) void {
-    println("  pop {s}", .{arg});
+    self.println("  pop {s}", .{arg});
     self.depth -= 1;
 }
 
@@ -37,19 +37,18 @@ pub fn gen(self: *Self, prog: *Obj) anyerror!void {
 }
 
 fn emit_data(self: *Self, prog: *Obj) anyerror!void {
-    _ = self;
     var cur: ?*Obj = prog;
     while (cur) |obj| {
         if (obj.as_var()) |v| {
-            println("  .data", .{});
-            println("  .globl {s}", .{obj.name});
-            println("{s}:", .{obj.name});
+            self.println("  .data", .{});
+            self.println("  .globl {s}", .{obj.name});
+            self.println("{s}:", .{obj.name});
             if (v.init_data) |init_data| {
                 for (init_data) |b| {
-                    println("  .byte {d}", .{b});
+                    self.println("  .byte {d}", .{b});
                 }
             } else {
-                println("  .zero {d}", .{obj.ty.size});
+                self.println("  .zero {d}", .{obj.ty.size});
             }
         }
         cur = obj.next;
@@ -69,13 +68,13 @@ fn emit_text(self: *Self, prog: *Obj) anyerror!void {
 
 fn gen_func(self: *Self, obj: *Obj, func: *FunKind) anyerror!void {
     self.cur_func = obj;
-    println("  .globl {s}", .{obj.name});
-    println("  .text", .{});
-    println("{s}:", .{obj.name});
+    self.println("  .globl {s}", .{obj.name});
+    self.println("  .text", .{});
+    self.println("{s}:", .{obj.name});
     //Prologue
-    println("  push %rbp", .{});
-    println("  mov %rsp, %rbp", .{});
-    println("  sub ${d}, %rsp", .{func.stack_size});
+    self.println("  push %rbp", .{});
+    self.println("  mov %rsp, %rbp", .{});
+    self.println("  sub ${d}, %rsp", .{func.stack_size});
 
     var params = func.params;
     var i: usize = 0;
@@ -83,9 +82,9 @@ fn gen_func(self: *Self, obj: *Obj, func: *FunKind) anyerror!void {
         std.log.debug("func.params: {s}", .{p.name});
         if (p.as_var()) |v| {
             if (p.ty.size == 1) {
-                println("  mov {s}, {d}(%rbp)", .{ arg_regs8[i], v.offset });
+                self.println("  mov {s}, {d}(%rbp)", .{ arg_regs8[i], v.offset });
             } else {
-                println("  mov {s}, {d}(%rbp)", .{ arg_regs64[i], v.offset });
+                self.println("  mov {s}, {d}(%rbp)", .{ arg_regs64[i], v.offset });
             }
         }
         params = p.next;
@@ -94,10 +93,10 @@ fn gen_func(self: *Self, obj: *Obj, func: *FunKind) anyerror!void {
 
     try self.gen_stmt(func.body);
     try utils.assert(self.depth == 0);
-    println(".L.return.{s}:", .{obj.name});
-    println("  mov %rbp, %rsp", .{});
-    println("  pop %rbp", .{});
-    println("  ret", .{});
+    self.println(".L.return.{s}:", .{obj.name});
+    self.println("  mov %rbp, %rsp", .{});
+    self.println("  pop %rbp", .{});
+    self.println("  ret", .{});
 }
 
 pub fn gen_stmt(self: *Self, node: *Node) anyerror!void {
@@ -106,7 +105,7 @@ pub fn gen_stmt(self: *Self, node: *Node) anyerror!void {
         .Return => {
             const expr_node = node.lhs.?;
             try self.gen_expr(expr_node);
-            println("  jmp .L.return.{s}", .{self.cur_func.?.name});
+            self.println("  jmp .L.return.{s}", .{self.cur_func.?.name});
         },
         .Stmt => {
             const expr_node = node.lhs.?;
@@ -124,43 +123,43 @@ pub fn gen_stmt(self: *Self, node: *Node) anyerror!void {
             const c = self.inc_count();
             const cond = node.cond.?;
             try self.gen_expr(cond);
-            println("cmp $0, %eax", .{});
-            println("je .L.else.{d}", .{c});
+            self.println("cmp $0, %eax", .{});
+            self.println("je .L.else.{d}", .{c});
             try self.gen_stmt(node.then.?);
-            println("je .L.end.{d}", .{c});
-            println(".L.else.{d}:", .{c});
+            self.println("je .L.end.{d}", .{c});
+            self.println(".L.else.{d}:", .{c});
             if (node.els) |els| {
                 try self.gen_stmt(els);
             }
-            println(".L.end.{d}:", .{c});
+            self.println(".L.end.{d}:", .{c});
         },
         .For => {
             const c = self.inc_count();
             if (node.init) |init_| {
                 try self.gen_stmt(init_);
             }
-            println(".L.begin.{d}:", .{c});
+            self.println(".L.begin.{d}:", .{c});
             if (node.cond) |cond| {
                 try self.gen_expr(cond);
-                println("cmp $0, %eax", .{});
-                println("je .L.end.{d}", .{c});
+                self.println("cmp $0, %eax", .{});
+                self.println("je .L.end.{d}", .{c});
             }
             try self.gen_stmt(node.then.?);
             if (node.inc) |inc| {
                 try self.gen_expr(inc);
             }
-            println("jmp .L.begin.{d}", .{c});
-            println(".L.end.{d}:", .{c});
+            self.println("jmp .L.begin.{d}", .{c});
+            self.println(".L.end.{d}:", .{c});
         },
         .While => {
             const c = self.inc_count();
-            println(".L.begin.{d}:", .{c});
+            self.println(".L.begin.{d}:", .{c});
             try self.gen_expr(node.cond.?);
-            println("cmp $0, %eax", .{});
-            println("je .L.end.{d}", .{c});
+            self.println("cmp $0, %eax", .{});
+            self.println("je .L.end.{d}", .{c});
             try self.gen_stmt(node.body.?);
-            println("jmp .L.begin.{d}", .{c});
-            println(".L.end.{d}:", .{c});
+            self.println("jmp .L.begin.{d}", .{c});
+            self.println(".L.end.{d}:", .{c});
         },
         else => return error.InvalidStmt,
     }
@@ -187,20 +186,20 @@ pub fn gen_expr(self: *Self, node: *Node) anyerror!void {
 
     switch (node.kind) {
         .Add => {
-            println("  add %rdi, %rax", .{});
+            self.println("  add %rdi, %rax", .{});
         },
         .Sub => {
-            println("  sub %rdi, %rax", .{});
+            self.println("  sub %rdi, %rax", .{});
         },
         .Mul => {
-            println("  imul %rdi, %rax", .{});
+            self.println("  imul %rdi, %rax", .{});
         },
         .Div => {
-            println("  cqo", .{});
-            println("  idiv %rdi", .{});
+            self.println("  cqo", .{});
+            self.println("  idiv %rdi", .{});
         },
         .Equal, .NotEqual, .LessThan, .LessEqual => {
-            println("  cmp %rdi, %rax", .{});
+            self.println("  cmp %rdi, %rax", .{});
             const opcode = switch (node.kind) {
                 .Equal => "sete",
                 .NotEqual => "setne",
@@ -208,8 +207,8 @@ pub fn gen_expr(self: *Self, node: *Node) anyerror!void {
                 .LessEqual => "setle",
                 else => unreachable,
             };
-            println("  {s} %al", .{opcode});
-            println("  movzb %al, %rax", .{});
+            self.println("  {s} %al", .{opcode});
+            self.println("  movzb %al, %rax", .{});
         },
         else => {
             return error.InvalidExpression;
@@ -220,23 +219,23 @@ pub fn gen_expr(self: *Self, node: *Node) anyerror!void {
 fn gen_unary(self: *Self, node: *Node) anyerror!bool {
     switch (node.kind) {
         .Num => {
-            println("  mov ${d}, %rax", .{node.val});
+            self.println("  mov ${d}, %rax", .{node.val});
         },
         .Neg => {
             try self.gen_expr(node.lhs.?);
-            println(" neg %rax", .{});
+            self.println(" neg %rax", .{});
         },
         .Addr => {
             try self.gen_addr(node.lhs.?);
         },
         .Deref => {
             try self.gen_expr(node.lhs.?);
-            // println(" mov (%rax), %rax", .{});
+            // self.println(" mov (%rax), %rax", .{});
             self.load(node.ty);
         },
         .Var => {
             try self.gen_addr(node);
-            //println("  mov (%rax), %rax", .{});
+            //self.println("  mov (%rax), %rax", .{});
             self.load(node.ty);
         },
         .Assign => {
@@ -244,7 +243,7 @@ fn gen_unary(self: *Self, node: *Node) anyerror!bool {
             self.push();
             try self.gen_expr(node.rhs.?);
             //self.pop("%rdi");
-            //println("  mov %rax, (%rdi)", .{});
+            //self.println("  mov %rax, (%rdi)", .{});
             self.store(node.ty);
         },
         .StmtExpr => {
@@ -260,7 +259,7 @@ fn gen_unary(self: *Self, node: *Node) anyerror!bool {
             while (args) |arg| {
                 try self.gen_expr(arg);
                 self.push();
-                //println("  mov %rax, {s}", .{arg_regs64[nargs]});
+                //self.println("  mov %rax, {s}", .{arg_regs64[nargs]});
                 nargs += 1;
                 args = arg.next;
             }
@@ -268,8 +267,8 @@ fn gen_unary(self: *Self, node: *Node) anyerror!bool {
                 self.pop(arg_regs64[nargs - 1]);
                 nargs -= 1;
             }
-            println("  mov $0, %rax", .{});
-            println("  call {s}", .{node.funcname.?});
+            self.println("  mov $0, %rax", .{});
+            self.println("  call {s}", .{node.funcname.?});
         },
         else => {
             return false;
@@ -285,9 +284,9 @@ fn gen_addr(self: *Self, node: *Node) anyerror!void {
             const var_ = node.var_.?;
             if (var_.as_var()) |v| {
                 if (v.local) {
-                    println("  lea {d}(%rbp), %rax", .{v.offset});
+                    self.println("  lea {d}(%rbp), %rax", .{v.offset});
                 } else {
-                    println("  lea {s}(%rip), %rax", .{var_.name});
+                    self.println("  lea {s}(%rip), %rax", .{var_.name});
                 }
             } else {
                 return error.NotAnLvalue;
@@ -301,7 +300,6 @@ fn gen_addr(self: *Self, node: *Node) anyerror!void {
 }
 
 fn load(self: *Self, ty: *Type) void {
-    _ = self;
     if (ty.kind == .Array) {
         // If it is an array, do not attempt to load a value to the
         // register because in general we can't load an entire array to a
@@ -312,9 +310,9 @@ fn load(self: *Self, ty: *Type) void {
         return;
     }
     if (ty.size == 1) {
-        println("  movsbq (%rax), %rax", .{});
+        self.println("  movsbq (%rax), %rax", .{});
     } else {
-        println("  mov (%rax), %rax", .{});
+        self.println("  mov (%rax), %rax", .{});
     }
 }
 
@@ -323,8 +321,17 @@ fn store(self: *Self, ty: *Type) void {
     self.pop("%rdi");
 
     if (ty.size == 1) {
-        println("  mov %al, (%rdi)", .{});
+        self.println("  mov %al, (%rdi)", .{});
     } else {
-        println("  mov %rax, (%rdi)", .{});
+        self.println("  mov %rax, (%rdi)", .{});
     }
+}
+
+pub fn print(self: *Self, comptime format: []const u8, args: anytype) void {
+    self.output_file.writer().print(format, args) catch unreachable;
+}
+
+pub fn println(self: *Self, comptime format: []const u8, args: anytype) void {
+    self.print(format, args);
+    self.print("\n", .{});
 }
