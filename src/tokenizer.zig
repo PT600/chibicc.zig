@@ -130,26 +130,36 @@ pub fn tokenize(self: *Self) anyerror!*Token {
     while (p[0] != 0) {
         if (isspace(p[0])) {
             p += 1;
-            continue;
-        }
-        if (isdigit(p[0])) {
+        } else if (isdigit(p[0])) {
             const start = p;
             const val = try utils.strtol(p, &p);
             const len = @ptrToInt(p) - @ptrToInt(start);
             const loc = start[0..len];
             cur.next = self.new_token(.{ .kind = .Num, .loc = loc, .val = val });
             cur = cur.next;
-            continue;
-        }
-        if (ispunct(p[0])) {
+        } else if (utils.str_startswith(p, "//")) {
+            p += 2;
+            while (p[0] != '\n') {
+                p += 1;
+            }
+        } else if (utils.str_startswith(p, "/*")) {
+            const start = p;
+            p += 2;
+            while (p[0] != 0) : (p += 1) {
+                if (p[0] == '*' and p[1] == '/') {
+                    p += 2;
+                    break;
+                }
+            } else {
+                return self.error_at(start, "unclosed block comment", .{});
+            }
+        } else if (ispunct(p[0])) {
             const punc_len: u8 = if (p[1] == '=' and (p[0] == '=' or p[0] == '!' or p[0] == '>' or p[0] == '<')) 2 else 1;
             const loc = p[0..punc_len];
             cur.next = self.new_token(.{ .kind = .Punct, .loc = loc });
             cur = cur.next;
             p += punc_len;
-            continue;
-        }
-        if (isalpha(p[0])) {
+        } else if (isalpha(p[0])) {
             var pp = p;
             while (isalpha(pp[0]) or isdigit(pp[0])) {
                 pp += 1;
@@ -160,9 +170,7 @@ pub fn tokenize(self: *Self) anyerror!*Token {
             cur = cur.next;
             convert_keyword(cur);
             p = pp;
-            continue;
-        }
-        if (p[0] == '"') {
+        } else if (p[0] == '"') {
             var pp = p + 1;
             while (pp[0] != '"') {
                 if (pp[0] == '\n') // or pp[0] == '\0')
@@ -174,10 +182,9 @@ pub fn tokenize(self: *Self) anyerror!*Token {
             cur.next = self.new_token(.{ .kind = .Str, .loc = loc });
             cur = cur.next;
             p = pp + 1;
-            continue;
+        } else {
+            return self.error_at(p, "invalid token", .{});
         }
-
-        return self.error_at(p, "invalid token", .{});
     }
     try self.debug_token(head.next);
     return head.next;
