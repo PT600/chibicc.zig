@@ -37,6 +37,12 @@ pub fn str_eql(src: [*:0]const u8, dest: []const u8) bool {
     return p[0] == 0;
 }
 
+pub fn alloc(allocator: std.mem.Allocator, comptime T: type, defaults: T) *T {
+    var t = allocator.create(T) catch unreachable;
+    t.* = defaults;
+    return t;
+}
+
 test "strtol" {
     var p: [*]const u8 = "123 + 345";
     var l = try strtol(p, &p);

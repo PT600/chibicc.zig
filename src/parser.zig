@@ -153,14 +153,28 @@ pub const Node = struct {
     }
 };
 
+const Scope = struct {
+    vars: std.ArrayList(*Obj),
+    next: ?*Scope = null,
+
+    fn find_var(self: Scope, tok: *Token) ?*Obj {
+        for (self.vars.items) |v| {
+            if (std.mem.eql(u8, v.name, tok.loc))
+                return v;
+        }
+        return null;
+    }
+};
+
 const Self = @This();
 
 allocator: std.mem.Allocator,
 tokenizer: *Tokenizer,
 cur_token: *Token,
-locals: ?*Obj,
-globals: ?*Obj,
-name_idx: u8,
+locals: ?*Obj = null,
+globals: ?*Obj = null,
+name_idx: u8 = 0,
+scope: *Scope,
 
 pub fn init(allocator: std.mem.Allocator, tokenizer: *Tokenizer, cur_token: *Token) *Self {
     const self = allocator.create(Self) catch unreachable;
@@ -170,6 +184,7 @@ pub fn init(allocator: std.mem.Allocator, tokenizer: *Tokenizer, cur_token: *Tok
     self.locals = null;
     self.globals = null;
     self.name_idx = 0;
+    self.scope = self.alloc(Scope, .{ .vars = std.ArrayList(*Obj).init(allocator) });
     return self;
 }
 
@@ -268,11 +283,8 @@ fn new_node(self: *Self, attr: Node) *Node {
 }
 
 fn new_var(self: *Self, ty: *Type, name: []const u8, kind: VarKind) *Obj {
-    const obj = self.allocator.create(Obj) catch unreachable;
-    obj.ty = ty;
-    obj.name = name;
-    obj.next = null;
-    obj.kind = ObjKind{ .Var = kind };
+    const obj = self.alloc(Obj, .{ .ty = ty, .name = name, .kind = .{ .Var = kind } });
+    self.push_scope(obj);
     return obj;
 }
 
@@ -779,15 +791,11 @@ fn peek(self: *Self) *Node {
 }
 
 fn find_var(self: *Self, tok: *Token) ?*Obj {
-    var locals = self.locals;
-    while (locals) |l| {
-        if (tok.eql(l.name)) return l;
-        locals = l.next;
-    }
-    var globals = self.globals;
-    while (globals) |l| {
-        if (tok.eql(l.name)) return l;
-        globals = l.next;
+    var scope: ?*Scope = self.scope;
+    while (scope) |s| {
+        if (s.find_var(tok)) |var_|
+            return var_;
+        scope = s.next;
     }
     return null;
 }
@@ -842,4 +850,22 @@ fn new_type(self: *Self, attr: Type) *Type {
 fn new_array_type(self: *Self, basety: *Type, len: usize) *Type {
     const size = basety.size * len;
     return self.new_type(.{ .kind = .Array, .base = basety, .array_len = len, .size = size });
+}
+
+fn push_scope(self: *Self, var_: *Obj) void {
+    self.scope.vars.append(var_) catch unreachable;
+}
+
+fn enter_scope(self: *Self) void {
+    var scope = self.alloc(Scope, .{ .vars = std.ArrayList(*Obj).init(self.allocator) });
+    scope.next = self.scope;
+    self.scope = scope;
+}
+
+fn leave_scope(self: *Self) void {
+    self.scope = self.scope.next.?;
+}
+
+pub fn alloc(self: *Self, comptime T: type, defaults: T) *T {
+    return utils.alloc(self.allocator, T, defaults);
 }
