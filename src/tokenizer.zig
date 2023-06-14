@@ -16,6 +16,7 @@ pub const Token = struct {
     pub var eof_token = Token{ .kind = .Eof, .loc = "" };
     kind: TokenKind,
     loc: []const u8,
+    line: usize = 0,
     next: *Token = undefined,
     val: i32 = 0,
 
@@ -37,10 +38,14 @@ pub const Token = struct {
         return self.val;
     }
 
-    pub fn error_tok(tok: *Token, comptime format: []const u8, args: anytype) anyerror {
+    pub fn error_tok(tok: *Token, comptime fmt: []const u8, args: anytype) anyerror {
         try errwriter.print("error token '{s}' ", .{tok.loc});
-        try errwriter.print(format, args);
+        try errwriter.print(fmt, args);
         return error.TokenError;
+    }
+
+    pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
+        return writer.print("loc: {s}, line: {d}", .{ self.loc, self.line });
     }
 };
 
@@ -86,6 +91,7 @@ const Self = @This();
 allocator: std.mem.Allocator,
 source: [*:0]const u8,
 cur_filename: [*:0]const u8,
+cur_line: usize = 0,
 
 pub fn init(allocator: std.mem.Allocator, source: [*:0]const u8, path: [*:0]const u8) Self {
     std.log.info("file: {s}, source: {s}", .{ path, source });
@@ -93,6 +99,7 @@ pub fn init(allocator: std.mem.Allocator, source: [*:0]const u8, path: [*:0]cons
         .allocator = allocator,
         .source = source,
         .cur_filename = path,
+        .cur_line = 0,
     };
 }
 
@@ -120,6 +127,7 @@ fn new_token(self: *Self, attr: Token) *Token {
     const token = self.allocator.create(Token) catch unreachable;
     token.* = attr;
     token.next = &Token.eof_token;
+    token.line = self.cur_line;
     return token;
 }
 
@@ -128,6 +136,9 @@ pub fn tokenize(self: *Self) anyerror!*Token {
     var head = Token{ .kind = .Eof, .loc = "" };
     var cur = &head;
     while (p[0] != 0) {
+        if (p[0] == '\n' or p[0] == '\r') {
+            self.cur_line += 1;
+        }
         if (isspace(p[0])) {
             p += 1;
         } else if (isdigit(p[0])) {
@@ -172,10 +183,11 @@ pub fn tokenize(self: *Self) anyerror!*Token {
             p = pp;
         } else if (p[0] == '"') {
             var pp = p + 1;
-            while (pp[0] != '"') {
+            while (pp[0] != '"') : (pp += 1) {
                 if (pp[0] == '\n') // or pp[0] == '\0')
                     return self.error_at(pp, "unclosed string literal", .{});
-                pp += 1;
+                if (pp[0] == '\\')
+                    pp += 1;
             }
             const end = @ptrToInt(pp + 1) - @ptrToInt(p);
             const loc = p[0..end];
@@ -183,7 +195,7 @@ pub fn tokenize(self: *Self) anyerror!*Token {
             cur = cur.next;
             p = pp + 1;
         } else {
-            return self.error_at(p, "invalid token", .{});
+            return self.error_at(p, "invalid token: {}", .{p[0] == '\\'});
         }
     }
     try self.debug_token(head.next);
@@ -194,4 +206,8 @@ pub fn convert_keyword(self: *Token) void {
     if (is_keyword(self.loc)) {
         self.kind = .Keyword;
     }
+}
+
+test "92 ascii" {
+    std.log.debug("{}", .{92 == '\\'});
 }

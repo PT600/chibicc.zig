@@ -22,11 +22,13 @@ pub fn init(output_file: std.fs.File) Self {
 }
 
 pub fn push(self: *Self) void {
+    std.log.debug("push...", .{});
     self.println("  push %rax", .{});
     self.depth += 1;
 }
 
 pub fn pop(self: *Self, arg: []const u8) void {
+    std.log.debug("pop...", .{});
     self.println("  pop {s}", .{arg});
     self.depth -= 1;
 }
@@ -115,7 +117,6 @@ pub fn gen_stmt(self: *Self, node: *Node) anyerror!void {
             var cur = node.body;
             while (cur) |body| {
                 try self.gen_stmt(body);
-                try utils.assert(self.depth == 0);
                 cur = body.next;
             }
         },
@@ -123,10 +124,10 @@ pub fn gen_stmt(self: *Self, node: *Node) anyerror!void {
             const c = self.inc_count();
             const cond = node.cond.?;
             try self.gen_expr(cond);
-            self.println("cmp $0, %eax", .{});
+            self.println("cmp $0, %rax", .{});
             self.println("je .L.else.{d}", .{c});
             try self.gen_stmt(node.then.?);
-            self.println("je .L.end.{d}", .{c});
+            self.println("jmp .L.end.{d}", .{c});
             self.println(".L.else.{d}:", .{c});
             if (node.els) |els| {
                 try self.gen_stmt(els);
@@ -141,7 +142,7 @@ pub fn gen_stmt(self: *Self, node: *Node) anyerror!void {
             self.println(".L.begin.{d}:", .{c});
             if (node.cond) |cond| {
                 try self.gen_expr(cond);
-                self.println("cmp $0, %eax", .{});
+                self.println("cmp $0, %rax", .{});
                 self.println("je .L.end.{d}", .{c});
             }
             try self.gen_stmt(node.then.?);
@@ -155,7 +156,7 @@ pub fn gen_stmt(self: *Self, node: *Node) anyerror!void {
             const c = self.inc_count();
             self.println(".L.begin.{d}:", .{c});
             try self.gen_expr(node.cond.?);
-            self.println("cmp $0, %eax", .{});
+            self.println("cmp $0, %rax", .{});
             self.println("je .L.end.{d}", .{c});
             try self.gen_stmt(node.body.?);
             self.println("jmp .L.begin.{d}", .{c});

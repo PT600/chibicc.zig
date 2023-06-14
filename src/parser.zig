@@ -87,24 +87,20 @@ pub const Obj = struct {
     }
 
     fn debug(self: *Obj) void {
-        var cur: ?*Obj = self;
-        while (cur) |obj| {
-            std.log.debug("*" ** 40, .{});
-            std.log.debug("obj.name: {s}", .{obj.name});
-            if (obj.as_fun()) |fun| {
-                std.log.debug("obj.is_function, params: {?}", .{fun.params});
-                fun.body.debug(0);
-            }
-            cur = obj.next;
+        std.log.debug("*" ** 40, .{});
+        std.log.debug("obj.name: {s}, ty: {?}", .{ self.name, self.ty });
+        if (self.as_fun()) |fun| {
+            std.log.debug("function, params: {?}", .{fun.params});
+            fun.body.debug(0);
         }
     }
 };
 
-const TABS = "                                    ";
+const TABS = " " ** 256;
 pub const Node = struct {
     kind: NodeKind,
-    next: ?*Node = null,
     tok: ?*Token = null,
+    next: ?*Node = null,
     lhs: ?*Node = null,
     rhs: ?*Node = null,
     // block or Statement Expression
@@ -133,7 +129,7 @@ pub const Node = struct {
 
     fn debug(self: *Node, depth: u8) void {
         const tab = TABS[0..(depth * 3)];
-        std.log.debug("{s} {}, ty: {}", .{ tab, self.kind, self.ty.kind });
+        std.log.debug("{s} {}, tok: {d} ty: {}", .{ tab, self.kind, self.tok.?, self.ty.kind });
         if (self.lhs) |lhs| {
             std.log.debug("{s} lhs:", .{tab});
             lhs.debug(depth + 1);
@@ -145,6 +141,18 @@ pub const Node = struct {
         if (self.body) |body| {
             std.log.debug("{s} body:", .{tab});
             body.debug(depth + 1);
+        }
+        if (self.cond) |cond| {
+            std.log.debug("{s} cond:", .{tab});
+            cond.debug(depth + 1);
+        }
+        if (self.then) |then| {
+            std.log.debug("{s} then:", .{tab});
+            then.debug(depth + 1);
+        }
+        if (self.els) |els| {
+            std.log.debug("{s} els:", .{tab});
+            els.debug(depth + 1);
         }
         if (self.kind != .Eof and self.next != null) {
             std.log.debug("{s} next:", .{tab});
@@ -158,6 +166,7 @@ const Scope = struct {
     next: ?*Scope = null,
 
     fn find_var(self: Scope, tok: *Token) ?*Obj {
+        std.log.debug("scope.vars.len: {d}", .{self.vars.items.len});
         for (self.vars.items) |v| {
             if (std.mem.eql(u8, v.name, tok.loc))
                 return v;
@@ -298,9 +307,11 @@ fn global_variable(self: *Self, ty: *Type, name: []const u8, kind: VarKind) *Obj
 
 // function = "(" (declspec declarator ",")* ")" "{" body "}";
 fn function(self: *Self, ty: *Type, name: []const u8) anyerror!*Obj {
+    std.log.debug("parse function: {s}, ty: {?}", .{ name, ty });
     const fun = self.new_func();
     fun.ty = ty;
     fun.name = name;
+    self.enter_scope();
     const params = try self.func_params();
     self.locals = params;
     try self.cur_token_skip("{");
@@ -312,6 +323,8 @@ fn function(self: *Self, ty: *Type, name: []const u8) anyerror!*Obj {
     } };
     fun.next = self.globals;
     self.globals = fun;
+    fun.debug();
+    self.leave_scope();
     return fun;
 }
 
@@ -327,7 +340,7 @@ pub fn stmt(self: *Self) anyerror!*Node {
         try self.cur_token_skip(";");
         return self.new_node(.{ .kind = .Return, .lhs = node });
     }
-    if (self.cur_token_match("if")) {
+    if (self.cur_token_match2("if")) |tok| {
         try self.cur_token_skip("(");
         const cond = try self.expr();
         try self.cur_token_skip(")");
@@ -336,7 +349,7 @@ pub fn stmt(self: *Self) anyerror!*Node {
             try self.stmt()
         else
             null;
-        return self.new_node(.{ .kind = .If, .cond = cond, .then = then, .els = els });
+        return self.new_node(.{ .kind = .If, .cond = cond, .then = then, .els = els, .tok = tok });
     }
     if (self.cur_token_match("for")) {
         try self.cur_token_skip("(");
@@ -370,6 +383,7 @@ pub fn stmt(self: *Self) anyerror!*Node {
 fn block_stmt(self: *Self) anyerror!*Node {
     var head = Node{ .kind = .Stmt };
     var cur = &head;
+    self.enter_scope();
     while (!self.cur_token.eql("}")) {
         const node = if (self.declspec()) |basety|
             try self.declaration(basety)
@@ -380,6 +394,7 @@ fn block_stmt(self: *Self) anyerror!*Node {
         //self.add_type(cur, 0);
     }
     try self.cur_token_skip("}");
+    self.leave_scope();
     return self.new_node(.{ .kind = .Block, .body = head.next });
 }
 
@@ -597,9 +612,9 @@ fn unary(self: *Self) anyerror!*Node {
         const node = try self.unary();
         return self.new_node(.{ .kind = .Addr, .lhs = node });
     }
-    if (self.cur_token_match("*")) {
+    if (self.cur_token_match2("*")) |tok| {
         const node = try self.unary();
-        return self.new_node(.{ .kind = .Deref, .lhs = node });
+        return self.new_node(.{ .kind = .Deref, .lhs = node, .tok = tok });
     }
     return self.postfix();
 }
@@ -639,7 +654,7 @@ fn primary(self: *Self) anyerror!*Node {
     if (self.cur_token_match_kind(.Ident)) |tok| {
         if (self.cur_token_match("(")) return self.funcall(tok.loc);
         const var_ = self.find_var(tok) orelse return error.ParseError;
-        const node = self.new_node(.{ .kind = .Var, .var_ = var_ });
+        const node = self.new_node(.{ .kind = .Var, .var_ = var_, .tok = tok });
         return node;
     }
     if (self.cur_token_match_kind(.Str)) |tok| {
@@ -754,6 +769,14 @@ fn funcall(self: *Self, funcname: []const u8) anyerror!*Node {
     return node;
 }
 
+fn cur_token_match2(self: *Self, tok: []const u8) ?*Token {
+    if (self.cur_token.eql(tok)) {
+        defer self.advance();
+        return self.cur_token;
+    }
+    return null;
+}
+
 fn cur_token_match(self: *Self, tok: []const u8) bool {
     if (self.cur_token.eql(tok)) {
         self.advance();
@@ -821,6 +844,7 @@ fn parse_type(self: *Self, node: *Node) void {
             node.ty = node.var_.?.ty;
         },
         .Deref => {
+            node.debug(0);
             node.ty = node.lhs.?.ty.base.?;
         },
         .Stmt => {
