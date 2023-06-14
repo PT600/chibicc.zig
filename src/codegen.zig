@@ -103,6 +103,7 @@ fn gen_func(self: *Self, obj: *Obj, func: *FunKind) anyerror!void {
 
 pub fn gen_stmt(self: *Self, node: *Node) anyerror!void {
     std.log.debug("gen_stmt, {}", .{node.kind});
+    self.println("  .loc 1 {d}", .{node.tok.?.line});
     switch (node.kind) {
         .Return => {
             const expr_node = node.lhs.?;
@@ -178,6 +179,7 @@ fn inc_count(self: *Self) u8 {
 // eval the expr to the %rax
 pub fn gen_expr(self: *Self, node: *Node) anyerror!void {
     std.log.debug("gen_expr for node: {}", .{node.kind});
+    self.println("  .loc 1 {d}", .{node.tok.?.line});
     if (try self.gen_unary(node)) return;
     try self.gen_expr(node.rhs.?);
     self.push();

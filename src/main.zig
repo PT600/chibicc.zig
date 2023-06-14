@@ -68,6 +68,7 @@ pub fn main() !void {
         const output_file = try std.fs.cwd().createFileZ(opts.output, .{});
         var codegen = Codegen.init(output_file);
 
+        codegen.println(".file 1 \"{s}\"", .{opts.output});
         try codegen.gen(func);
     }
 }
