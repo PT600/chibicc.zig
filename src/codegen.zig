@@ -213,6 +213,10 @@ pub fn gen_expr(self: *Self, node: *Node) anyerror!void {
             self.println("  {s} %al", .{opcode});
             self.println("  movzb %al, %rax", .{});
         },
+        .Comma => {
+            try self.gen_expr(node.lhs.?);
+            try self.gen_expr(node.rhs.?);
+        },
         else => {
             return error.InvalidExpression;
         },
@@ -297,6 +301,10 @@ fn gen_addr(self: *Self, node: *Node) anyerror!void {
         },
         .Deref => {
             try self.gen_expr(node.lhs.?);
+        },
+        .Comma => {
+            try self.gen_expr(node.lhs.?);
+            try self.gen_addr(node.rhs.?);
         },
         else => return error.NotAnLvalue,
     }

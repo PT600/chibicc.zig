@@ -24,6 +24,7 @@ pub const NodeKind = enum(u8) {
     While,
     Eof,
     Assign,
+    Comma, //,
     Return,
     Block,
     Var,
@@ -498,21 +499,24 @@ fn expr_stmt(self: *Self) anyerror!*Node {
     return self.new_node(.{ .kind = .Stmt, .lhs = node });
 }
 
+// expr = assign ("," expr)?
 pub fn expr(self: *Self) anyerror!*Node {
-    return self.assign();
+    var node = try self.assign();
+    if (self.cur_token_match2(",")) |tok| {
+        const rhs = try self.expr();
+        return self.new_node(.{ .kind = .Comma, .lhs = node, .rhs = rhs, .tok = tok });
+    }
+    return node;
 }
 
 // assign = identity (= assign)*
 fn assign(self: *Self) anyerror!*Node {
     var node = try self.equality();
-    while (true) {
-        if (self.cur_token_match("=")) {
-            const right = try self.assign();
-            node = self.new_node(.{ .kind = .Assign, .lhs = node, .rhs = right });
-            continue;
-        }
-        return node;
+    if (self.cur_token_match2("=")) |tok| {
+        const right = try self.assign();
+        node = self.new_node(.{ .kind = .Assign, .lhs = node, .rhs = right, .tok = tok });
     }
+    return node;
 }
 
 // equality = relational ( "==|!=" relational) *
@@ -760,7 +764,7 @@ fn funcall(self: *Self, funcname: []const u8) anyerror!*Node {
     var head = Node{ .kind = .Stmt };
     var cur = &head;
     while (!self.cur_token_match(")")) {
-        const arg = try self.expr();
+        const arg = try self.assign();
         cur.next = arg;
         cur = arg;
         _ = self.cur_token_match(",");
@@ -856,6 +860,9 @@ fn parse_type(self: *Self, node: *Node) void {
                 body = b;
             }
             node.ty = body.ty;
+        },
+        .Comma => {
+            node.ty = node.rhs.?.ty;
         },
         else => return,
     }
