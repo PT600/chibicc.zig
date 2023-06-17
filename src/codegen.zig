@@ -178,7 +178,7 @@ fn inc_count(self: *Self) u8 {
 // pop the right to the %rdi from stack
 // eval the expr to the %rax
 pub fn gen_expr(self: *Self, node: *Node) anyerror!void {
-    std.log.debug("gen_expr for node: {}", .{node.kind});
+    std.log.debug("gen_expr for node: {?}", .{node});
     self.println("  .loc 1 {d}", .{node.tok.?.line});
     if (try self.gen_unary(node)) return;
     try self.gen_expr(node.rhs.?);
@@ -240,7 +240,7 @@ fn gen_unary(self: *Self, node: *Node) anyerror!bool {
             // self.println(" mov (%rax), %rax", .{});
             self.load(node.ty);
         },
-        .Var => {
+        .Var, .Member => {
             try self.gen_addr(node);
             //self.println("  mov (%rax), %rax", .{});
             self.load(node.ty);
@@ -305,6 +305,10 @@ fn gen_addr(self: *Self, node: *Node) anyerror!void {
         .Comma => {
             try self.gen_expr(node.lhs.?);
             try self.gen_addr(node.rhs.?);
+        },
+        .Member => {
+            try self.gen_addr(node.lhs.?);
+            self.println("  add ${d}, %rax", .{node.member.?.offset});
         },
         else => return error.NotAnLvalue,
     }

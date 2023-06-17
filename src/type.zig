@@ -8,6 +8,7 @@ pub const TypeKind = enum(u8) {
     Ptr,
     Func,
     Array,
+    Struct,
     None,
 };
 
@@ -17,10 +18,17 @@ pub var TYPE_CHAR = Self{ .kind = .Char, .size = 1 };
 pub var TYPE_INT = Self{ .kind = .Int, .size = 8 };
 pub var TYPE_NONE = Self{ .kind = .None, .size = 0 };
 
+pub const Member = struct {
+    ty: *Self,
+    name: *Token,
+    offset: usize = 0,
+};
+
 kind: TypeKind,
 base: ?*Self = null,
 return_ty: ?*Self = null,
 params: ?*Self = null,
+members: ?[]*Member = null,
 // Array
 array_len: usize = 0,
 // Pointer

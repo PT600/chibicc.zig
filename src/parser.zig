@@ -4,6 +4,7 @@ const Tokenizer = @import("tokenizer.zig");
 const Token = Tokenizer.Token;
 const TokenKind = Tokenizer.TokenKind;
 const Type = @import("type.zig");
+const Member = Type.Member;
 
 pub const NodeKind = enum(u8) {
     Add,
@@ -31,6 +32,8 @@ pub const NodeKind = enum(u8) {
     Addr, // &
     Deref, // *
     Funcall,
+
+    Member, // struct member
 };
 
 pub const FunKind = struct {
@@ -119,6 +122,9 @@ pub const Node = struct {
     ty: *Type = &Type.TYPE_NONE,
     funcname: ?[]const u8 = null,
     args: ?*Node = null,
+
+    // struct member
+    member: ?*Member = null,
 
     fn is_ty_integer(self: *Node) bool {
         return self.ty.kind == .Int or self.ty.kind == .Char;
@@ -421,18 +427,49 @@ fn declaration(self: *Self, basety: *Type) anyerror!*Node {
     return node;
 }
 
+// declspec = "char" | "int" | struct-decl
 fn declspec(self: *Self) ?*Type {
     if (self.cur_token_match("int")) {
         return &Type.TYPE_INT;
     } else if (self.cur_token_match("char")) {
         return &Type.TYPE_CHAR;
+    } else if (self.cur_token_match("struct")) {
+        return self.struct_decl() catch unreachable;
     }
     return null;
+}
+
+fn struct_decl(self: *Self) anyerror!*Type {
+    try self.cur_token_skip("{");
+    var members = std.ArrayList(*Member).init(self.allocator);
+    var offset: usize = 0;
+    while (!self.cur_token_match("}")) {
+        const basety = self.declspec().?;
+        while (!self.cur_token_match(";")) {
+            const decl = try self.declarator(basety);
+            const member = self.new_member(.{ .ty = decl.ty, .name = decl.tok, .offset = offset });
+            offset += member.ty.size;
+            try members.append(member);
+        }
+    }
+    const ty = self.new_type(.{ .kind = .Struct, .size = offset, .members = members.items });
+    return ty;
+}
+
+pub fn get_struct_member(ty: *Type, tok: *Token) !*Type.Member {
+    if (ty.members) |members| {
+        for (members) |mem| {
+            if (std.mem.eql(u8, mem.name.loc, tok.loc))
+                return mem;
+        }
+    }
+    return tok.error_tok("no such member", .{});
 }
 
 const Declarator = struct {
     ty: *Type,
     name: []const u8,
+    tok: *Token,
     is_function: bool,
 };
 
@@ -443,21 +480,14 @@ fn declarator(self: *Self, basety: *Type) !Declarator {
     while (self.cur_token_match("*")) {
         ty = self.pointer_to(ty);
     }
-    const name = try self.consume_ident();
+    const tok = try self.cur_token_consume_kind(.Ident);
     var is_function = true;
     if (!self.cur_token.eql("(")) {
         is_function = false;
         ty = try self.array_suffix(ty);
     }
-    return .{ .ty = ty, .name = name, .is_function = is_function };
-}
-
-fn consume_ident(self: *Self) ![]const u8 {
-    if (self.cur_token.kind != .Ident)
-        return self.cur_token.error_tok("expect a variable name", .{});
-    const tok = self.cur_token;
-    self.advance();
-    return tok.loc;
+    std.log.debug("parse declarator end, .{}", .{tok});
+    return .{ .ty = ty, .name = tok.loc, .tok = tok, .is_function = is_function };
 }
 
 // fucn-params = ("(" params ")")?
@@ -623,13 +653,27 @@ fn unary(self: *Self) anyerror!*Node {
     return self.postfix();
 }
 
+// postfix = primary ("[" expr "]" | "." ident)*
 fn postfix(self: *Self) anyerror!*Node {
     var node = try self.primary();
-    while (self.cur_token_match("[")) {
-        const idx = try self.expr();
-        node = try self.new_add(node, idx);
-        node = self.new_node(.{ .kind = .Deref, .lhs = node });
-        try self.cur_token_skip("]");
+    while (true) {
+        if (self.cur_token_match2("[")) |tok| {
+            const idx = try self.expr();
+            node = try self.new_add(node, idx);
+            node = self.new_node(.{ .kind = .Deref, .lhs = node, .tok = tok });
+            try self.cur_token_skip("]");
+            continue;
+        }
+        if (self.cur_token_match2(".")) |tok| {
+            if (node.ty.kind != .Struct) {
+                return tok.error_tok("not a struct", .{});
+            }
+            const ident = try self.cur_token_consume_kind(.Ident);
+            const member = try get_struct_member(node.ty, ident);
+            node = self.new_node(.{ .kind = .Member, .lhs = node, .member = member, .tok = tok });
+            continue;
+        }
+        break;
     }
     return node;
 }
@@ -798,11 +842,11 @@ fn cur_token_match_kind(self: *Self, kind: TokenKind) ?*Token {
     return null;
 }
 
-fn token_match(tok: ?*Token, name: []const u8) bool {
-    if (tok) |t| {
-        return std.mem.eql(u8, t.loc, name);
+fn cur_token_consume_kind(self: *Self, kind: TokenKind) !*Token {
+    if (self.cur_token_match_kind(kind)) |tok| {
+        return tok;
     }
-    return false;
+    return self.cur_token.error_tok("expect token kind: {}", .{kind});
 }
 
 fn cur_token_skip(self: *Self, tok: []const u8) !void {
@@ -864,12 +908,21 @@ fn parse_type(self: *Self, node: *Node) void {
         .Comma => {
             node.ty = node.rhs.?.ty;
         },
+        .Member => {
+            node.ty = node.member.?.ty;
+        },
         else => return,
     }
 }
 
 fn pointer_to(self: *Self, base: *Type) *Type {
     return self.new_type(.{ .kind = .Ptr, .base = base, .size = 8 });
+}
+
+fn new_member(self: *Self, attr: Type.Member) *Member {
+    var mem = self.allocator.create(Type.Member) catch unreachable;
+    mem.* = attr;
+    return mem;
 }
 
 fn new_type(self: *Self, attr: Type) *Type {

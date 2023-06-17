@@ -59,7 +59,25 @@ fn isdigit(c: u8) bool {
 
 fn ispunct(c: u8) bool {
     return switch (c) {
-        '+', '-', '*', '/', '(', ')', '=', '<', '>', '!', ';', '{', '}', '&', ',', '[', ']' => true,
+        '+',
+        '-',
+        '*',
+        '/',
+        '(',
+        ')',
+        '=',
+        '<',
+        '>',
+        '!',
+        ';',
+        '{',
+        '}',
+        '&',
+        ',',
+        '[',
+        ']',
+        '.',
+        => true,
         else => false,
     };
 }
@@ -76,6 +94,7 @@ const KEYWORDS = [_][]const u8{
     "while",
     "sizeof",
     "char",
+    "struct",
 };
 
 fn is_keyword(word: []const u8) bool {
@@ -206,8 +225,4 @@ pub fn convert_keyword(self: *Token) void {
     if (is_keyword(self.loc)) {
         self.kind = .Keyword;
     }
-}
-
-test "92 ascii" {
-    std.log.debug("{}", .{92 == '\\'});
 }
