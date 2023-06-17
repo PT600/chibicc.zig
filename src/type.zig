@@ -14,9 +14,9 @@ pub const TypeKind = enum(u8) {
 
 const Self = @This();
 
-pub var TYPE_CHAR = Self{ .kind = .Char, .size = 1 };
-pub var TYPE_INT = Self{ .kind = .Int, .size = 8 };
-pub var TYPE_NONE = Self{ .kind = .None, .size = 0 };
+pub var TYPE_CHAR = Self{ .kind = .Char, .size = 1, .align_ = 1 };
+pub var TYPE_INT = Self{ .kind = .Int, .size = 8, .align_ = 8 };
+pub var TYPE_NONE = Self{ .kind = .None, .size = 0, .align_ = 0 };
 
 pub const Member = struct {
     ty: *Self,
@@ -29,6 +29,7 @@ base: ?*Self = null,
 return_ty: ?*Self = null,
 params: ?*Self = null,
 members: ?[]*Member = null,
+align_: usize,
 // Array
 array_len: usize = 0,
 // Pointer
@@ -48,4 +49,10 @@ pub fn is_integer(self: *Self) bool {
 
 pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {
     return writer.print("{?}, {?}", .{ self.kind, self.base });
+}
+
+// Round up `n` to the nearest multiple of `align`. For instance,
+// align_to(5, 8) returns 8 and align_to(11, 8) returns 16.
+pub fn align_to(n: usize, align_: usize) usize {
+    return (n + align_ - 1) / align_ * align_;
 }

@@ -82,12 +82,8 @@ pub const Obj = struct {
                 }
                 locals = l.next;
             }
-            fun.stack_size = align_to(offset, 16);
+            fun.stack_size = Type.align_to(offset, 16);
         }
-    }
-
-    fn align_to(n: usize, align_: usize) usize {
-        return (n + align_ - 1) / align_ * align_;
     }
 
     fn debug(self: *Obj) void {
@@ -207,7 +203,7 @@ pub fn init(allocator: std.mem.Allocator, tokenizer: *Tokenizer, cur_token: *Tok
 // program = (function-definition | global-variable)*
 pub fn parse(self: *Self) anyerror!*Obj {
     while (self.cur_token.kind != .Eof) {
-        var basety = self.declspec().?;
+        var basety = try self.declspec();
         var decl = try self.declarator(basety);
         if (decl.is_function) {
             _ = try self.function(decl.ty, decl.name);
@@ -394,7 +390,7 @@ fn block_stmt(self: *Self) anyerror!*Node {
     while (!self.cur_token.eql("}")) {
         const node = if (self.declspec()) |basety|
             try self.declaration(basety)
-        else
+        else |_|
             try self.stmt();
         cur.next = node;
         cur = node;
@@ -428,31 +424,35 @@ fn declaration(self: *Self, basety: *Type) anyerror!*Node {
 }
 
 // declspec = "char" | "int" | struct-decl
-fn declspec(self: *Self) ?*Type {
+fn declspec(self: *Self) anyerror!*Type {
     if (self.cur_token_match("int")) {
         return &Type.TYPE_INT;
     } else if (self.cur_token_match("char")) {
         return &Type.TYPE_CHAR;
     } else if (self.cur_token_match("struct")) {
-        return self.struct_decl() catch unreachable;
+        return self.struct_decl();
     }
-    return null;
+    return self.cur_token.error_tok("need a declspec", .{});
 }
 
 fn struct_decl(self: *Self) anyerror!*Type {
     try self.cur_token_skip("{");
     var members = std.ArrayList(*Member).init(self.allocator);
     var offset: usize = 0;
+    var align_: usize = 1;
     while (!self.cur_token_match("}")) {
-        const basety = self.declspec().?;
+        const basety = try self.declspec();
         while (!self.cur_token_match(";")) {
             const decl = try self.declarator(basety);
+            offset = Type.align_to(offset, decl.ty.align_);
             const member = self.new_member(.{ .ty = decl.ty, .name = decl.tok, .offset = offset });
             offset += member.ty.size;
             try members.append(member);
+            align_ = @max(align_, member.ty.align_);
         }
     }
-    const ty = self.new_type(.{ .kind = .Struct, .size = offset, .members = members.items });
+    var size = Type.align_to(offset, align_);
+    const ty = self.new_type(.{ .kind = .Struct, .size = size, .members = members.items, .align_ = align_ });
     return ty;
 }
 
@@ -496,7 +496,7 @@ fn func_params(self: *Self) !?*Obj {
     var cur = &head;
     try self.cur_token_skip("(");
     while (!self.cur_token_match(")")) {
-        var basety = self.declspec().?;
+        var basety = try self.declspec();
         var decl = try self.declarator(basety);
         const var_ = self.new_var(decl.ty, decl.name, .{});
         cur.next = var_;
@@ -916,7 +916,7 @@ fn parse_type(self: *Self, node: *Node) void {
 }
 
 fn pointer_to(self: *Self, base: *Type) *Type {
-    return self.new_type(.{ .kind = .Ptr, .base = base, .size = 8 });
+    return self.new_type(.{ .kind = .Ptr, .base = base, .size = 8, .align_ = 8 });
 }
 
 fn new_member(self: *Self, attr: Type.Member) *Member {
@@ -933,7 +933,7 @@ fn new_type(self: *Self, attr: Type) *Type {
 
 fn new_array_type(self: *Self, basety: *Type, len: usize) *Type {
     const size = basety.size * len;
-    return self.new_type(.{ .kind = .Array, .base = basety, .array_len = len, .size = size });
+    return self.new_type(.{ .kind = .Array, .base = basety, .array_len = len, .size = size, .align_ = basety.align_ });
 }
 
 fn push_scope(self: *Self, var_: *Obj) void {
