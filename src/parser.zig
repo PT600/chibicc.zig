@@ -77,6 +77,7 @@ pub const Obj = struct {
             var locals = fun.locals;
             while (locals) |l| {
                 offset += l.ty.size;
+                offset = Type.align_to(offset, l.ty.align_);
                 if (l.as_var()) |v| {
                     v.offset = -@intCast(i16, offset);
                 }
@@ -201,7 +202,7 @@ pub fn init(allocator: std.mem.Allocator, tokenizer: *Tokenizer, cur_token: *Tok
 }
 
 // program = (function-definition | global-variable)*
-pub fn parse(self: *Self) anyerror!*Obj {
+pub fn parse(self: *Self) !*Obj {
     while (self.cur_token.kind != .Eof) {
         var basety = try self.declspec();
         var decl = try self.declarator(basety);
@@ -309,7 +310,7 @@ fn global_variable(self: *Self, ty: *Type, name: []const u8, kind: VarKind) *Obj
 }
 
 // function = "(" (declspec declarator ",")* ")" "{" body "}";
-fn function(self: *Self, ty: *Type, name: []const u8) anyerror!*Obj {
+fn function(self: *Self, ty: *Type, name: []const u8) !*Obj {
     std.log.debug("parse function: {s}, ty: {?}", .{ name, ty });
     const fun = self.new_func();
     fun.ty = ty;
@@ -337,7 +338,7 @@ fn function(self: *Self, ty: *Type, name: []const u8) anyerror!*Obj {
 //      | "while (cond) stmt
 //      |  "{" compound_stmt "}"
 //      |  expr_stmt
-pub fn stmt(self: *Self) anyerror!*Node {
+pub fn stmt(self: *Self) !*Node {
     if (self.cur_token_match("return")) {
         var node = try self.expr();
         try self.cur_token_skip(";");
@@ -402,7 +403,7 @@ fn block_stmt(self: *Self) anyerror!*Node {
 }
 
 // declaration = declarator ("["num"]")? ("=" expr)? ("," declarator ("=" expr)?)* ";"
-fn declaration(self: *Self, basety: *Type) anyerror!*Node {
+fn declaration(self: *Self, basety: *Type) !*Node {
     var head = Node{ .kind = .Block };
     var cur = &head;
     while (!self.cur_token_match(";")) {
@@ -424,7 +425,7 @@ fn declaration(self: *Self, basety: *Type) anyerror!*Node {
 }
 
 // declspec = "char" | "int" | struct-decl
-fn declspec(self: *Self) anyerror!*Type {
+fn declspec(self: *Self) !*Type {
     if (self.cur_token_match("int")) {
         return &Type.TYPE_INT;
     } else if (self.cur_token_match("char")) {
@@ -435,7 +436,7 @@ fn declspec(self: *Self) anyerror!*Type {
     return self.cur_token.error_tok("need a declspec", .{});
 }
 
-fn struct_decl(self: *Self) anyerror!*Type {
+fn struct_decl(self: *Self) !*Type {
     try self.cur_token_skip("{");
     var members = std.ArrayList(*Member).init(self.allocator);
     var offset: usize = 0;
@@ -519,7 +520,7 @@ fn array_suffix(self: *Self, basety: *Type) !*Type {
 }
 
 // expr-stmt = expr? ";"
-fn expr_stmt(self: *Self) anyerror!*Node {
+fn expr_stmt(self: *Self) !*Node {
     if (self.cur_token.eql(";")) {
         self.advance();
         return self.new_node(.{ .kind = .Block });
@@ -530,7 +531,7 @@ fn expr_stmt(self: *Self) anyerror!*Node {
 }
 
 // expr = assign ("," expr)?
-pub fn expr(self: *Self) anyerror!*Node {
+pub fn expr(self: *Self) !*Node {
     var node = try self.assign();
     if (self.cur_token_match2(",")) |tok| {
         const rhs = try self.expr();
@@ -540,7 +541,7 @@ pub fn expr(self: *Self) anyerror!*Node {
 }
 
 // assign = identity (= assign)*
-fn assign(self: *Self) anyerror!*Node {
+fn assign(self: *Self) !*Node {
     var node = try self.equality();
     if (self.cur_token_match2("=")) |tok| {
         const right = try self.assign();
@@ -550,7 +551,7 @@ fn assign(self: *Self) anyerror!*Node {
 }
 
 // equality = relational ( "==|!=" relational) *
-pub fn equality(self: *Self) anyerror!*Node {
+pub fn equality(self: *Self) !*Node {
     var node = try self.relational();
     while (true) {
         if (self.cur_token_match("==")) {
@@ -567,7 +568,7 @@ pub fn equality(self: *Self) anyerror!*Node {
     }
 }
 // relational = add ( "<|<=|>|>=" add) *
-pub fn relational(self: *Self) anyerror!*Node {
+pub fn relational(self: *Self) !*Node {
     var node = try self.add();
     while (true) {
         if (self.cur_token_match("<")) {
@@ -595,7 +596,7 @@ pub fn relational(self: *Self) anyerror!*Node {
 }
 
 // add = mul ("+"|"-" mul) *
-pub fn add(self: *Self) anyerror!*Node {
+pub fn add(self: *Self) !*Node {
     var node = try self.mul();
     while (true) {
         if (self.cur_token_match("+")) {
@@ -614,7 +615,7 @@ pub fn add(self: *Self) anyerror!*Node {
     }
 }
 // mul = primary ("*|/" primary) *
-fn mul(self: *Self) anyerror!*Node {
+fn mul(self: *Self) !*Node {
     var node = try self.unary();
     while (true) {
         if (self.cur_token.eql("*")) {
@@ -634,7 +635,7 @@ fn mul(self: *Self) anyerror!*Node {
 }
 
 // unary = ("+" | "-" | "*" | "&" ) unary
-fn unary(self: *Self) anyerror!*Node {
+fn unary(self: *Self) !*Node {
     if (self.cur_token_match("-")) {
         const node = try self.unary();
         return self.new_node(.{ .kind = .Neg, .lhs = node });
@@ -679,7 +680,7 @@ fn postfix(self: *Self) anyerror!*Node {
 }
 
 // primary = "(" "{"stmt"}" | expr ")" | ident args? | num
-fn primary(self: *Self) anyerror!*Node {
+fn primary(self: *Self) !*Node {
     if (self.cur_token_match("(")) {
         if (self.cur_token_match("{")) {
             const block = try self.block_stmt();
@@ -798,12 +799,12 @@ fn read_escaped_char(c: u8) u8 {
     };
 }
 
-fn new_unique_name(self: *Self) anyerror![]const u8 {
+fn new_unique_name(self: *Self) ![]const u8 {
     self.name_idx += 1;
     return std.fmt.allocPrint(self.allocator, ".L..{d}", .{self.name_idx});
 }
 
-fn funcall(self: *Self, funcname: []const u8) anyerror!*Node {
+fn funcall(self: *Self, funcname: []const u8) !*Node {
     const node = self.new_node(.{ .kind = .Funcall, .funcname = funcname });
     var head = Node{ .kind = .Stmt };
     var cur = &head;
