@@ -232,6 +232,8 @@ assert 3 'int main() { return (1,2,3);}'
 
 assert 1 'int main() { struct {int a; int b;} x; x.a=1; x.b=2; return x.a; }'
 
-assert 16, 'int main() { struct {char a; int b;} x; return sizeof(x); }';
+assert 16 'int main() { struct {char a; int b;} x; return sizeof(x); }';
+
+assert 16 'int main() { struct t {int a; int b;} x; struct t y; sizeof(y); }';
 
 echo OK

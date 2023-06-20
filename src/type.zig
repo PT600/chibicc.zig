@@ -28,8 +28,10 @@ kind: TypeKind,
 base: ?*Self = null,
 return_ty: ?*Self = null,
 params: ?*Self = null,
-members: ?[]*Member = null,
 align_: usize,
+// struct
+members: ?[]*Member = null,
+tag: ?*Token = null,
 // Array
 array_len: usize = 0,
 // Pointer

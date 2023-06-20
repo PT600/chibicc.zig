@@ -40,7 +40,7 @@ pub const Token = struct {
 
     pub fn error_tok(tok: *Token, comptime fmt: []const u8, args: anytype) anyerror {
         try errwriter.print("error token '{s}' ", .{tok.loc});
-        try errwriter.print(fmt, args);
+        try errwriter.print(fmt ++ "\n", args);
         return error.TokenError;
     }
 

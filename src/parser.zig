@@ -167,6 +167,7 @@ pub const Node = struct {
 
 const Scope = struct {
     vars: std.ArrayList(*Obj),
+    tags: std.ArrayList(*Type),
     next: ?*Scope = null,
 
     fn find_var(self: Scope, tok: *Token) ?*Obj {
@@ -174,6 +175,17 @@ const Scope = struct {
         for (self.vars.items) |v| {
             if (std.mem.eql(u8, v.name, tok.loc))
                 return v;
+        }
+        return null;
+    }
+
+    fn find_tag(self: Scope, tok: *Token) ?*Type {
+        std.log.debug("scope.tags.len: {d}", .{self.tags.items.len});
+        for (self.tags.items) |t| {
+            if (t.tag) |tag| {
+                if (std.mem.eql(u8, tag.loc, tok.loc))
+                    return t;
+            }
         }
         return null;
     }
@@ -196,8 +208,7 @@ pub fn init(allocator: std.mem.Allocator, tokenizer: *Tokenizer, cur_token: *Tok
     self.cur_token = cur_token;
     self.locals = null;
     self.globals = null;
-    self.name_idx = 0;
-    self.scope = self.alloc(Scope, .{ .vars = std.ArrayList(*Obj).init(allocator) });
+    self.scope = self.create_scope();
     return self;
 }
 
@@ -430,17 +441,37 @@ fn declspec(self: *Self) !*Type {
         return &Type.TYPE_INT;
     } else if (self.cur_token_match("char")) {
         return &Type.TYPE_CHAR;
-    } else if (self.cur_token_match("struct")) {
+    } else if (self.cur_token_match2("struct")) |_| {
         return self.struct_decl();
     }
     return self.cur_token.error_tok("need a declspec", .{});
 }
 
+// struct-decl = ident? "{" struct_members
 fn struct_decl(self: *Self) !*Type {
+    var ty = self.new_type(.{ .kind = .Struct, .align_ = 0, .size = 0 });
+    if (self.cur_token_match_kind(.Ident)) |tag| {
+        if (!self.cur_token.eql("{")) {
+            if (self.scope.find_tag(tag)) |tag_ty| {
+                return tag_ty;
+            } else {
+                return tag.error_tok("unknown struct type", .{});
+            }
+        } else {
+            ty.tag = tag;
+            self.push_tag(ty);
+        }
+    }
     try self.cur_token_skip("{");
+    try self.struct_members(ty);
+    return ty;
+}
+
+fn struct_members(self: *Self, ty: *Type) !void {
     var members = std.ArrayList(*Member).init(self.allocator);
     var offset: usize = 0;
     var align_: usize = 1;
+    std.log.debug("enter struct", .{});
     while (!self.cur_token_match("}")) {
         const basety = try self.declspec();
         while (!self.cur_token_match(";")) {
@@ -452,9 +483,10 @@ fn struct_decl(self: *Self) !*Type {
             align_ = @max(align_, member.ty.align_);
         }
     }
-    var size = Type.align_to(offset, align_);
-    const ty = self.new_type(.{ .kind = .Struct, .size = size, .members = members.items, .align_ = align_ });
-    return ty;
+    std.log.debug("leave struct", .{});
+    ty.size = Type.align_to(offset, align_);
+    ty.members = members.items;
+    ty.align_ = align_;
 }
 
 pub fn get_struct_member(ty: *Type, tok: *Token) !*Type.Member {
@@ -941,10 +973,19 @@ fn push_scope(self: *Self, var_: *Obj) void {
     self.scope.vars.append(var_) catch unreachable;
 }
 
+fn push_tag(self: *Self, tag: *Type) void {
+    self.scope.tags.append(tag) catch unreachable;
+}
+
 fn enter_scope(self: *Self) void {
-    var scope = self.alloc(Scope, .{ .vars = std.ArrayList(*Obj).init(self.allocator) });
+    var scope = self.create_scope();
     scope.next = self.scope;
     self.scope = scope;
+}
+
+fn create_scope(self: *Self) *Scope {
+    var scope = self.alloc(Scope, .{ .vars = std.ArrayList(*Obj).init(self.allocator), .tags = std.ArrayList(*Type).init(self.allocator) });
+    return scope;
 }
 
 fn leave_scope(self: *Self) void {
