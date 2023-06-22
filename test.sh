@@ -236,4 +236,7 @@ assert 16 'int main() { struct {char a; int b;} x; return sizeof(x); }';
 
 assert 16 'int main() { struct t {int a; int b;} x; struct t y; sizeof(y); }';
 
+ ssert 8 'int main() { union { int a; char b[6]; } x; sizeof(x); }';
+assert 3 'int main() { union { int a; char b[4]; } x; x.a = 515; x.b[0]; }';
+
 echo OK

@@ -443,6 +443,8 @@ fn declspec(self: *Self) !*Type {
         return &Type.TYPE_CHAR;
     } else if (self.cur_token_match2("struct")) |_| {
         return self.struct_decl();
+    } else if (self.cur_token_match2("union")) |_| {
+        return self.union_decl();
     }
     return self.cur_token.error_tok("need a declspec", .{});
 }
@@ -467,7 +469,6 @@ fn struct_members(self: *Self, ty: *Type) !void {
     var members = std.ArrayList(*Member).init(self.allocator);
     var offset: usize = 0;
     var align_: usize = 1;
-    std.log.debug("enter struct", .{});
     while (!self.cur_token_match("}")) {
         const basety = try self.declspec();
         while (!self.cur_token_match(";")) {
@@ -479,12 +480,42 @@ fn struct_members(self: *Self, ty: *Type) !void {
             align_ = @max(align_, member.ty.align_);
         }
     }
-    std.log.debug("leave struct", .{});
     ty.size = Type.align_to(offset, align_);
     ty.members = members.items;
     ty.align_ = align_;
 }
 
+// struct-decl = ident? "{" struct_members
+fn union_decl(self: *Self) !*Type {
+    var ty = self.new_type(.{ .kind = .Union, .align_ = 0, .size = 0 });
+    if (self.cur_token_match_kind(.Ident)) |tag| {
+        if (!self.cur_token.eql("{")) {
+            return self.scope.find_tag(tag) orelse tag.error_tok("unknown union type", .{});
+        } else {
+            ty.tag = tag;
+            self.push_tag(ty);
+        }
+    }
+    try self.union_members(ty);
+    return ty;
+}
+
+fn union_members(self: *Self, ty: *Type) !void {
+    try self.cur_token_skip("{");
+    var members = std.ArrayList(*Member).init(self.allocator);
+    while (!self.cur_token_match("}")) {
+        const basety = try self.declspec();
+        while (!self.cur_token_match(";")) {
+            const decl = try self.declarator(basety);
+            const member = self.new_member(.{ .ty = decl.ty, .name = decl.tok, .offset = 0 });
+            try members.append(member);
+            ty.align_ = @max(ty.align_, member.ty.align_);
+            ty.size = @max(ty.size, member.ty.size);
+        }
+    }
+    ty.size = Type.align_to(ty.size, ty.align_);
+    ty.members = members.items;
+}
 pub fn get_struct_member(ty: *Type, tok: *Token) !*Type.Member {
     if (ty.members) |members| {
         for (members) |mem| {
@@ -694,15 +725,12 @@ fn postfix(self: *Self) anyerror!*Node {
             continue;
         }
         if (self.cur_token_match2(".")) |tok| {
-            if (node.ty.kind != .Struct) {
-                return tok.error_tok("not a struct", .{});
-            }
-            node = try self.struct_ref(node);
+            node = try self.struct_ref(node, tok);
             continue;
         }
         if (self.cur_token_match2("->")) |tok| {
             node = self.new_node(.{ .kind = .Deref, .lhs = node, .tok = tok });
-            node = try self.struct_ref(node);
+            node = try self.struct_ref(node, tok);
             continue;
         }
         break;
@@ -710,7 +738,10 @@ fn postfix(self: *Self) anyerror!*Node {
     return node;
 }
 
-fn struct_ref(self: *Self, node: *Node) !*Node {
+fn struct_ref(self: *Self, node: *Node, tok: *Token) !*Node {
+    if (node.ty.kind != .Struct and node.ty.kind != .Union) {
+        return tok.error_tok("not a struct nor a union", .{});
+    }
     const ident = try self.cur_token_consume_kind(.Ident);
     const member = try get_struct_member(node.ty, ident);
     return self.new_node(.{ .kind = .Member, .lhs = node, .member = member, .tok = ident });

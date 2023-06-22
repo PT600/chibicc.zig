@@ -95,6 +95,7 @@ const KEYWORDS = [_][]const u8{
     "sizeof",
     "char",
     "struct",
+    "union",
 };
 
 fn is_keyword(word: []const u8) bool {

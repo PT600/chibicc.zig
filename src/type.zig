@@ -9,6 +9,7 @@ pub const TypeKind = enum(u8) {
     Func,
     Array,
     Struct,
+    Union,
     None,
 };
 
