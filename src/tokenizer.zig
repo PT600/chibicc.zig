@@ -184,11 +184,11 @@ pub fn tokenize(self: *Self) anyerror!*Token {
                 return self.error_at(start, "unclosed block comment", .{});
             }
         } else if (ispunct(p[0])) {
-            const punc_len: u8 = if (p[1] == '=' and (p[0] == '=' or p[0] == '!' or p[0] == '>' or p[0] == '<')) 2 else 1;
-            const loc = p[0..punc_len];
+            const punct_len = read_punct_len(p);
+            const loc = p[0..punct_len];
             cur.next = self.new_token(.{ .kind = .Punct, .loc = loc });
             cur = cur.next;
-            p += punc_len;
+            p += punct_len;
         } else if (isalpha(p[0])) {
             var pp = p;
             while (isalpha(pp[0]) or isdigit(pp[0])) {
@@ -219,6 +219,15 @@ pub fn tokenize(self: *Self) anyerror!*Token {
     }
     try self.debug_token(head.next);
     return head.next;
+}
+
+fn read_punct_len(p: [*:0]const u8) usize {
+    const kws = [_][]const u8{ "==", "!=", "<=", ">=", "->" };
+    for (kws) |kw| {
+        if (utils.str_startswith(p, kw))
+            return kw.len;
+    }
+    return 1;
 }
 
 pub fn convert_keyword(self: *Token) void {

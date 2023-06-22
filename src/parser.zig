@@ -452,22 +452,18 @@ fn struct_decl(self: *Self) !*Type {
     var ty = self.new_type(.{ .kind = .Struct, .align_ = 0, .size = 0 });
     if (self.cur_token_match_kind(.Ident)) |tag| {
         if (!self.cur_token.eql("{")) {
-            if (self.scope.find_tag(tag)) |tag_ty| {
-                return tag_ty;
-            } else {
-                return tag.error_tok("unknown struct type", .{});
-            }
+            return self.scope.find_tag(tag) orelse tag.error_tok("unknown struct type", .{});
         } else {
             ty.tag = tag;
             self.push_tag(ty);
         }
     }
-    try self.cur_token_skip("{");
     try self.struct_members(ty);
     return ty;
 }
 
 fn struct_members(self: *Self, ty: *Type) !void {
+    try self.cur_token_skip("{");
     var members = std.ArrayList(*Member).init(self.allocator);
     var offset: usize = 0;
     var align_: usize = 1;
@@ -686,7 +682,7 @@ fn unary(self: *Self) !*Node {
     return self.postfix();
 }
 
-// postfix = primary ("[" expr "]" | "." ident)*
+// postfix = primary ("[" expr "]" | "." ident | "->" ident)*
 fn postfix(self: *Self) anyerror!*Node {
     var node = try self.primary();
     while (true) {
@@ -701,14 +697,23 @@ fn postfix(self: *Self) anyerror!*Node {
             if (node.ty.kind != .Struct) {
                 return tok.error_tok("not a struct", .{});
             }
-            const ident = try self.cur_token_consume_kind(.Ident);
-            const member = try get_struct_member(node.ty, ident);
-            node = self.new_node(.{ .kind = .Member, .lhs = node, .member = member, .tok = tok });
+            node = try self.struct_ref(node);
+            continue;
+        }
+        if (self.cur_token_match2("->")) |tok| {
+            node = self.new_node(.{ .kind = .Deref, .lhs = node, .tok = tok });
+            node = try self.struct_ref(node);
             continue;
         }
         break;
     }
     return node;
+}
+
+fn struct_ref(self: *Self, node: *Node) !*Node {
+    const ident = try self.cur_token_consume_kind(.Ident);
+    const member = try get_struct_member(node.ty, ident);
+    return self.new_node(.{ .kind = .Member, .lhs = node, .member = member, .tok = ident });
 }
 
 // primary = "(" "{"stmt"}" | expr ")" | ident args? | num
