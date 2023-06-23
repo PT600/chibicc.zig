@@ -315,30 +315,39 @@ fn gen_addr(self: *Self, node: *Node) anyerror!void {
 }
 
 fn load(self: *Self, ty: *Type) void {
-    if (ty.kind == .Array) {
-        // If it is an array, do not attempt to load a value to the
-        // register because in general we can't load an entire array to a
-        // register. As a result, the result of an evaluation of an array
-        // becomes not the array itself but the address of the array.
-        // This is where "array is automatically converted to a pointer to
-        // the first element of the array in C" occurs.
-        return;
-    }
-    if (ty.size == 1) {
-        self.println("  movsbq (%rax), %rax", .{});
-    } else {
-        self.println("  mov (%rax), %rax", .{});
+    switch (ty.kind) {
+        .Array, .Struct, .Union => {
+            // If it is an array, do not attempt to load a value to the
+            // register because in general we can't load an entire array to a
+            // register. As a result, the result of an evaluation of an array
+            // becomes not the array itself but the address of the array.
+            // This is where "array is automatically converted to a pointer to
+            // the first element of the array in C" occurs.
+            return;
+        },
+        else => if (ty.size == 1) {
+            self.println("  movsbq (%rax), %rax", .{});
+        } else {
+            self.println("  mov (%rax), %rax", .{});
+        },
     }
 }
 
 // Store %rax to an address that the stack top is pointing to
 fn store(self: *Self, ty: *Type) void {
     self.pop("%rdi");
-
-    if (ty.size == 1) {
-        self.println("  mov %al, (%rdi)", .{});
-    } else {
-        self.println("  mov %rax, (%rdi)", .{});
+    switch (ty.kind) {
+        .Struct, .Union => {
+            for (0..ty.size) |i| {
+                self.println("  mov {d}(%rax), %r8b", .{i});
+                self.println("  mov %r8b, {d}(%rdi)", .{i});
+            }
+        },
+        else => if (ty.size == 1) {
+            self.println("  mov %al, (%rdi)", .{});
+        } else {
+            self.println("  mov %rax, (%rdi)", .{});
+        },
     }
 }
 
