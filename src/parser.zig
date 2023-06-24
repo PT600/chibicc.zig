@@ -115,7 +115,7 @@ pub const Node = struct {
     init: ?*Node = null,
     inc: ?*Node = null,
     var_: ?*Obj = null,
-    val: i32 = 0,
+    val: i64 = 0,
     ty: *Type = &Type.TYPE_NONE,
     funcname: ?[]const u8 = null,
     args: ?*Node = null,
@@ -124,7 +124,7 @@ pub const Node = struct {
     member: ?*Member = null,
 
     fn is_ty_integer(self: *Node) bool {
-        return self.ty.kind == .Int or self.ty.kind == .Char;
+        return self.ty.is_integer();
     }
 
     // fn is_ty_pointer(self: *Node) bool {
@@ -290,7 +290,7 @@ fn new_func(self: *Self) *Obj {
 }
 
 fn new_num(self: *Self, val: anytype) *Node {
-    return self.new_node(.{ .kind = .Num, .val = @intCast(i32, val), .ty = &Type.TYPE_INT });
+    return self.new_node(.{ .kind = .Num, .val = @intCast(i64, val), .ty = &Type.TYPE_LONG });
 }
 
 fn new_binary(self: *Self, kind: NodeKind, lhs: *Node, rhs: *Node) *Node {
@@ -439,6 +439,8 @@ fn declaration(self: *Self, basety: *Type) !*Node {
 fn declspec(self: *Self) !*Type {
     if (self.cur_token_match("int")) {
         return &Type.TYPE_INT;
+    } else if (self.cur_token_match("long")) {
+        return &Type.TYPE_LONG;
     } else if (self.cur_token_match("char")) {
         return &Type.TYPE_CHAR;
     } else if (self.cur_token_match2("struct")) |_| {
@@ -955,7 +957,7 @@ fn parse_type(self: *Self, node: *Node) void {
             }
         },
         .Equal, .NotEqual, .LessThan, .LessEqual, .Num, .Funcall => {
-            node.ty = &Type.TYPE_INT;
+            node.ty = &Type.TYPE_LONG;
         },
         .Var => {
             node.ty = node.var_.?.ty;

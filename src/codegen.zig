@@ -4,7 +4,6 @@ const Type = @import("type.zig");
 const Node = Parser.Node;
 const Obj = Parser.Obj;
 const FunKind = Parser.FunKind;
-const VarKind = Parser.VarKind;
 const utils = @import("utils.zig");
 
 const GenError = error{ InvalidExpression, InvalidStmt, NotAnLvalue };
@@ -85,7 +84,7 @@ fn gen_func(self: *Self, obj: *Obj, func: *FunKind) anyerror!void {
     while (params) |p| {
         std.log.debug("func.params: {s}", .{p.name});
         if (p.as_var()) |v| {
-            self.store_gp(i, p.ty.size, v);
+            self.store_gp(i, p.ty.size, v.offset);
         }
         params = p.next;
         i += 1;
@@ -99,16 +98,16 @@ fn gen_func(self: *Self, obj: *Obj, func: *FunKind) anyerror!void {
     self.println("  ret", .{});
 }
 
-fn store_gp(self: *Self, i: usize, tysize: usize, v: *VarKind) void {
+fn store_gp(self: *Self, i: usize, tysize: usize, offset: i16) void {
     switch (tysize) {
         1 => {
-            self.println("  mov {s}, {d}(%rbp)", .{ arg_regs8[i], v.offset });
+            self.println("  mov {s}, {d}(%rbp)", .{ arg_regs8[i], offset });
         },
         4 => {
-            self.println("  mov {s}, {d}(%rbp)", .{ arg_regs32[i], v.offset });
+            self.println("  mov {s}, {d}(%rbp)", .{ arg_regs32[i], offset });
         },
         8 => {
-            self.println("  mov {s}, {d}(%rbp)", .{ arg_regs64[i], v.offset });
+            self.println("  mov {s}, {d}(%rbp)", .{ arg_regs64[i], offset });
         },
         else => unreachable(),
     }

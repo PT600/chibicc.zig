@@ -5,6 +5,8 @@ const Token = @import("tokenizer.zig").Token;
 pub const TypeKind = enum(u8) {
     Char,
     Int,
+    Long,
+    Short,
     Ptr,
     Func,
     Array,
@@ -17,6 +19,8 @@ const Self = @This();
 
 pub var TYPE_CHAR = Self{ .kind = .Char, .size = 1, .align_ = 1 };
 pub var TYPE_INT = Self{ .kind = .Int, .size = 4, .align_ = 4 };
+pub var TYPE_LONG = Self{ .kind = .Long, .size = 8, .align_ = 8 };
+pub var TYPE_SHORT = Self{ .kind = .Short, .size = 2, .align_ = 2 };
 pub var TYPE_NONE = Self{ .kind = .None, .size = 0, .align_ = 0 };
 
 pub const Member = struct {
@@ -47,7 +51,10 @@ size: usize, // sizeof() value
 // the C spec.
 
 pub fn is_integer(self: *Self) bool {
-    return self.kind == .Int or self.kind == .Char;
+    return switch (self.kind) {
+        .Int, .Char, .Long, .Short => true,
+        else => false,
+    };
 }
 
 pub fn format(self: @This(), comptime _: []const u8, _: std.fmt.FormatOptions, writer: anytype) std.os.WriteError!void {

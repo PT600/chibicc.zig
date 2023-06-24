@@ -18,7 +18,7 @@ pub const Token = struct {
     loc: []const u8,
     line: usize = 0,
     next: *Token = undefined,
-    val: i32 = 0,
+    val: i64 = 0,
 
     pub fn eql(self: *Token, s: []const u8) bool {
         return std.mem.eql(u8, self.loc, s);
@@ -31,7 +31,7 @@ pub const Token = struct {
         return self.next;
     }
 
-    pub fn get_number(self: *Token) anyerror!i32 {
+    pub fn get_number(self: *Token) anyerror!i64 {
         if (self.kind != .Num) {
             return self.error_tok("expected a number!\n", .{});
         }
@@ -94,8 +94,11 @@ const KEYWORDS = [_][]const u8{
     "while",
     "sizeof",
     "char",
+    "int",
     "struct",
     "union",
+    "long",
+    "short",
 };
 
 fn is_keyword(word: []const u8) bool {
