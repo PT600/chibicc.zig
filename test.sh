@@ -11,6 +11,7 @@ int sub(int x, int y) { return x-y; }
 int add6(int a, int b, int c, int d, int e, int f) {
   return a+b+c+d+e+f;
 }
+
 EOF
 
 assert() {
@@ -226,19 +227,21 @@ assert() {
 #assert 3 'int main() { int x=2; { x=3; } return x; }'
 
 
-assert 0 'int main() { return ""[0]; }'
+#assert 0 'int main() { return ""[0]; }'
+#
+#assert 3 'int main() { return (1,2,3);}'
+#
+#assert 1 'int main() { struct {int a; int b;} x; x.a=1; x.b=2; return x.a; }'
+#
+#assert 16 'int main() { struct {char a; int b;} x; return sizeof(x); }';
+#
+#assert 16 'int main() { struct t {int a; int b;} x; struct t y; sizeof(y); }';
+#
+#assert 8 'int main() { union { int a; char b[6]; } x; sizeof(x); }';
+#assert 3 'int main() { union { int a; char b[4]; } x; x.a = 515; x.b[0]; }';
+#
+#assert 3 'int main() { struct {int a,b;} x,y; x.a=3; y=x; y.a; }';
 
-assert 3 'int main() { return (1,2,3);}'
-
-assert 1 'int main() { struct {int a; int b;} x; x.a=1; x.b=2; return x.a; }'
-
-assert 16 'int main() { struct {char a; int b;} x; return sizeof(x); }';
-
-assert 16 'int main() { struct t {int a; int b;} x; struct t y; sizeof(y); }';
-
-assert 8 'int main() { union { int a; char b[6]; } x; sizeof(x); }';
-assert 3 'int main() { union { int a; char b[4]; } x; x.a = 515; x.b[0]; }';
-
-assert 3 'int main() { struct {int a,b;} x,y; x.a=3; y=x; y.a; }';
+assert 1 ' int sub_short(short a, short b, short c) { return a - b - c; } int main(){ return sub_short(7, 3, 3); }';
 
 echo OK

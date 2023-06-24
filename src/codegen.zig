@@ -10,6 +10,7 @@ const GenError = error{ InvalidExpression, InvalidStmt, NotAnLvalue };
 
 const Self = @This();
 const arg_regs8 = [_][]const u8{ "%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b" };
+const arg_regs16 = [_][]const u8{ "%di", "%si", "%dx", "%cx", "%r8w", "%r9w" };
 const arg_regs32 = [_][]const u8{ "%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d" };
 const arg_regs64 = [_][]const u8{ "%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9" };
 
@@ -102,6 +103,9 @@ fn store_gp(self: *Self, i: usize, tysize: usize, offset: i16) void {
     switch (tysize) {
         1 => {
             self.println("  mov {s}, {d}(%rbp)", .{ arg_regs8[i], offset });
+        },
+        2 => {
+            self.println("  mov {s}, {d}(%rbp)", .{ arg_regs16[i], offset });
         },
         4 => {
             self.println("  mov {s}, {d}(%rbp)", .{ arg_regs32[i], offset });
@@ -339,6 +343,8 @@ fn load(self: *Self, ty: *Type) void {
         },
         else => if (ty.size == 1) {
             self.println("  movsbq (%rax), %rax", .{});
+        } else if (ty.size == 2) {
+            self.println("  movswq (%rax), %rax", .{});
         } else if (ty.size == 4) {
             self.println("  movsxd (%rax), %rax", .{});
         } else {
@@ -359,6 +365,8 @@ fn store(self: *Self, ty: *Type) void {
         },
         else => if (ty.size == 1) {
             self.println("  mov %al, (%rdi)", .{});
+        } else if (ty.size == 2) {
+            self.println("  mov %ax, (%rdi)", .{});
         } else if (ty.size == 4) {
             self.println("  mov %eax, (%rdi)", .{});
         } else {

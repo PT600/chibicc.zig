@@ -435,12 +435,14 @@ fn declaration(self: *Self, basety: *Type) !*Node {
     return node;
 }
 
-// declspec = "char" | "int" | struct-decl
+// declspec = "char" | "int" |"short" | "long" | struct-decl
 fn declspec(self: *Self) !*Type {
     if (self.cur_token_match("int")) {
         return &Type.TYPE_INT;
     } else if (self.cur_token_match("long")) {
         return &Type.TYPE_LONG;
+    } else if (self.cur_token_match("short")) {
+        return &Type.TYPE_SHORT;
     } else if (self.cur_token_match("char")) {
         return &Type.TYPE_CHAR;
     } else if (self.cur_token_match2("struct")) |_| {
