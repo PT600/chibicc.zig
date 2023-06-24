@@ -4,12 +4,14 @@ const Type = @import("type.zig");
 const Node = Parser.Node;
 const Obj = Parser.Obj;
 const FunKind = Parser.FunKind;
+const VarKind = Parser.VarKind;
 const utils = @import("utils.zig");
 
 const GenError = error{ InvalidExpression, InvalidStmt, NotAnLvalue };
 
 const Self = @This();
 const arg_regs8 = [_][]const u8{ "%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b" };
+const arg_regs32 = [_][]const u8{ "%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d" };
 const arg_regs64 = [_][]const u8{ "%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9" };
 
 depth: u32,
@@ -83,11 +85,7 @@ fn gen_func(self: *Self, obj: *Obj, func: *FunKind) anyerror!void {
     while (params) |p| {
         std.log.debug("func.params: {s}", .{p.name});
         if (p.as_var()) |v| {
-            if (p.ty.size == 1) {
-                self.println("  mov {s}, {d}(%rbp)", .{ arg_regs8[i], v.offset });
-            } else {
-                self.println("  mov {s}, {d}(%rbp)", .{ arg_regs64[i], v.offset });
-            }
+            self.store_gp(i, p.ty.size, v);
         }
         params = p.next;
         i += 1;
@@ -99,6 +97,21 @@ fn gen_func(self: *Self, obj: *Obj, func: *FunKind) anyerror!void {
     self.println("  mov %rbp, %rsp", .{});
     self.println("  pop %rbp", .{});
     self.println("  ret", .{});
+}
+
+fn store_gp(self: *Self, i: usize, tysize: usize, v: *VarKind) void {
+    switch (tysize) {
+        1 => {
+            self.println("  mov {s}, {d}(%rbp)", .{ arg_regs8[i], v.offset });
+        },
+        4 => {
+            self.println("  mov {s}, {d}(%rbp)", .{ arg_regs32[i], v.offset });
+        },
+        8 => {
+            self.println("  mov {s}, {d}(%rbp)", .{ arg_regs64[i], v.offset });
+        },
+        else => unreachable(),
+    }
 }
 
 pub fn gen_stmt(self: *Self, node: *Node) anyerror!void {
@@ -327,6 +340,8 @@ fn load(self: *Self, ty: *Type) void {
         },
         else => if (ty.size == 1) {
             self.println("  movsbq (%rax), %rax", .{});
+        } else if (ty.size == 4) {
+            self.println("  movsxd (%rax), %rax", .{});
         } else {
             self.println("  mov (%rax), %rax", .{});
         },
@@ -345,6 +360,8 @@ fn store(self: *Self, ty: *Type) void {
         },
         else => if (ty.size == 1) {
             self.println("  mov %al, (%rdi)", .{});
+        } else if (ty.size == 4) {
+            self.println("  mov %eax, (%rdi)", .{});
         } else {
             self.println("  mov %rax, (%rdi)", .{});
         },
