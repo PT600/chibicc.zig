@@ -544,6 +544,17 @@ fn declarator(self: *Self, basety: *Type) !Declarator {
     while (self.cur_token_match("*")) {
         ty = self.pointer_to(ty);
     }
+    if (self.cur_token_match("(")) {
+        const start = self.cur_token;
+        _ = try self.declarator(&Type.TYPE_NONE);
+        try self.cur_token_skip(")");
+        ty = try self.array_suffix(ty);
+        const end = self.cur_token;
+        self.cur_token = start;
+        const decl = try self.declarator(ty);
+        self.cur_token = end;
+        return decl;
+    }
     const tok = try self.cur_token_consume_kind(.Ident);
     var is_function = true;
     if (!self.cur_token.eql("(")) {

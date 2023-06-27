@@ -244,4 +244,6 @@ assert() {
 
 assert 1 ' int sub_short(short a, short b, short c) { return a - b - c; } int main(){ return sub_short(7, 3, 3); }';
 
+assert 8 ' int main(){ char (*x)[3]; sizeof(x); }';
+
 echo OK
