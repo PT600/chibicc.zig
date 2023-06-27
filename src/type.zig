@@ -12,11 +12,13 @@ pub const TypeKind = enum(u8) {
     Array,
     Struct,
     Union,
+    Void,
     None,
 };
 
 const Self = @This();
 
+pub var TYPE_VOID = Self{ .kind = .Void, .size = 1, .align_ = 1 };
 pub var TYPE_CHAR = Self{ .kind = .Char, .size = 1, .align_ = 1 };
 pub var TYPE_INT = Self{ .kind = .Int, .size = 4, .align_ = 4 };
 pub var TYPE_LONG = Self{ .kind = .Long, .size = 8, .align_ = 8 };

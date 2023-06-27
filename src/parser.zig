@@ -303,7 +303,7 @@ fn new_node(self: *Self, attr: Node) *Node {
     node.* = attr;
     if (attr.tok == null)
         node.tok = self.cur_token;
-    self.parse_type(node);
+    self.parse_type(node) catch unreachable;
     return node;
 }
 
@@ -456,6 +456,8 @@ fn declspec(self: *Self) !*Type {
         return &Type.TYPE_SHORT;
     } else if (self.cur_token_match("char")) {
         return &Type.TYPE_CHAR;
+    } else if (self.cur_token_match("void")) {
+        return &Type.TYPE_VOID;
     } else if (self.cur_token_match2("struct")) |_| {
         return self.struct_decl();
     } else if (self.cur_token_match2("union")) |_| {
@@ -966,7 +968,7 @@ fn find_var(self: *Self, tok: *Token) ?*Obj {
     return null;
 }
 
-fn parse_type(self: *Self, node: *Node) void {
+fn parse_type(self: *Self, node: *Node) !void {
     if (node.ty.kind != .None) return;
     switch (node.kind) {
         .Add, .Sub, .Mul, .Div, .Neg, .Assign => {
@@ -987,8 +989,14 @@ fn parse_type(self: *Self, node: *Node) void {
             node.ty = node.var_.?.ty;
         },
         .Deref => {
-            node.debug(0);
-            node.ty = node.lhs.?.ty.base.?;
+            if (node.lhs.?.ty.base) |base| {
+                if (base.kind == .Void) {
+                    return node.tok.?.error_tok("deref a void pointer!", .{});
+                }
+                node.ty = base;
+            } else {
+                return node.tok.?.error_tok("invalid pointer deref", .{});
+            }
         },
         .Stmt => {
             node.ty = node.lhs.?.ty;
