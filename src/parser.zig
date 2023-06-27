@@ -41,6 +41,7 @@ pub const FunKind = struct {
     params: ?*Obj = null,
     locals: ?*Obj = null,
     stack_size: usize = 0,
+    is_def: bool = false,
 };
 
 pub const VarKind = struct {
@@ -329,16 +330,26 @@ fn function(self: *Self, ty: *Type, name: []const u8) !*Obj {
     self.enter_scope();
     const params = try self.func_params();
     self.locals = params;
-    try self.cur_token_skip("{");
-    const body = try self.block_stmt();
-    fun.kind = ObjKind{ .Fun = FunKind{
-        .params = params,
-        .body = body,
-        .locals = self.locals,
-    } };
-    fun.next = self.globals;
-    self.globals = fun;
-    fun.debug();
+    if (self.cur_token_match(";")) {
+        fun.kind = ObjKind{ .Fun = FunKind{
+            .body = undefined,
+            .params = params,
+            .locals = self.locals,
+            .is_def = true,
+        } };
+    } else {
+        try self.cur_token_skip("{");
+        const body = try self.block_stmt();
+        fun.kind = ObjKind{ .Fun = FunKind{
+            .params = params,
+            .body = body,
+            .locals = self.locals,
+            .is_def = false,
+        } };
+        fun.next = self.globals;
+        self.globals = fun;
+        fun.debug();
+    }
     self.leave_scope();
     return fun;
 }

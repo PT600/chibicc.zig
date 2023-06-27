@@ -63,8 +63,10 @@ fn emit_text(self: *Self, prog: *Obj) anyerror!void {
     var cur: ?*Obj = prog;
     while (cur) |obj| {
         if (obj.as_fun()) |fun| {
-            obj.assign_lvar_offsets();
-            try self.gen_func(obj, fun);
+            if (!fun.is_def) {
+                obj.assign_lvar_offsets();
+                try self.gen_func(obj, fun);
+            }
         }
         cur = obj.next;
     }
