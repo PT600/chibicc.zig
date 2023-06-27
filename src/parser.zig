@@ -448,13 +448,14 @@ fn declaration(self: *Self, basety: *Type) !*Node {
 
 // declspec = "char" | "int" |"short" | "long" | struct-decl
 fn declspec(self: *Self) !*Type {
-    if (self.cur_token_match("int")) {
-        return &Type.TYPE_INT;
-    } else if (self.cur_token_match("long")) {
-        return &Type.TYPE_LONG;
-    } else if (self.cur_token_match("short")) {
-        return &Type.TYPE_SHORT;
-    } else if (self.cur_token_match("char")) {
+    var cur_type = self.decl_int();
+    var int_type = cur_type;
+    while (cur_type) |t| {
+        if (t.kind != .Int) int_type = t;
+        cur_type = self.decl_int();
+    }
+    if (int_type) |t| return t;
+    if (self.cur_token_match("char")) {
         return &Type.TYPE_CHAR;
     } else if (self.cur_token_match("void")) {
         return &Type.TYPE_VOID;
@@ -464,6 +465,17 @@ fn declspec(self: *Self) !*Type {
         return self.union_decl();
     }
     return self.cur_token.error_tok("need a declspec", .{});
+}
+
+fn decl_int(self: *Self) ?*Type {
+    if (self.cur_token_match("int")) {
+        return &Type.TYPE_INT;
+    } else if (self.cur_token_match("long")) {
+        return &Type.TYPE_LONG;
+    } else if (self.cur_token_match("short")) {
+        return &Type.TYPE_SHORT;
+    }
+    return null;
 }
 
 // struct-decl = ident? "{" struct_members
